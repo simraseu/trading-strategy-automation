@@ -4,7 +4,7 @@
 
 ## 🚧 Project Status: In Development
 
-**Timeline**: 6-week intensive development (Starting [Your Return Date])  
+**Timeline**: 6-week intensive development (Starting 3rd July)  
 **Goal**: Automate manual trading strategy with 85%+ correlation
 
 ## 📋 Strategy Overview
@@ -38,7 +38,7 @@ This project serves as a portfolio piece demonstrating:
 
 ---
 
-**Development Start Date**: [Your Return Date]  
-**Expected Completion**: [6 weeks later]
+**Development Start Date**: 3rd July  
+**Expected Completion**: 6-8 weeks later
 
 *Repository will be actively updated with daily progress during development phase.*
