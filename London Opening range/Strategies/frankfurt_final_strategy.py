@@ -303,5 +303,7 @@ class FrankfurtOpeningRangeStrategy:
 # Run the strategy
 if __name__ == "__main__":
     # CHANGE THIS PATH TO YOUR FILE LOCATION
-    strategy = FrankfurtOpeningRangeStrategy('C:/Users/sim/Desktop/Quant/London Opening range/Strategies/EURUSD.raw_M15_202106170000_202507021515.csv')
+    strategy = FrankfurtOpeningRangeStrategy('C:/Users/sim/Desktop/Quant/European Opening Range/trading-strategy-automation/London Opening range/Data/EURUSD.raw_M5_201701100005_202507021745.csv')
     results = strategy.backtest()
+
+    
