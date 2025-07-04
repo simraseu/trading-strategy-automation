@@ -57,7 +57,7 @@ def visualize_zones_simple():
         # Load data
         print("📊 Loading EURUSD data...")
         data_loader = DataLoader()
-        data = data_loader.load_pair_data('EURUSD', 'H12')
+        data = data_loader.load_pair_data('EURUSD', 'Weekly')
         
         # Initialize components
         candle_classifier = CandleClassifier(data)
@@ -66,7 +66,7 @@ def visualize_zones_simple():
         print("✅ Components initialized successfully")
         
         # Use smaller sample for testing
-        sample_size = 150
+        sample_size = 100
         sample_data = data.tail(sample_size).copy()
         sample_data.reset_index(drop=True, inplace=True)
         

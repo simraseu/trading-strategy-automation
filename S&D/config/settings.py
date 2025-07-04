@@ -71,10 +71,10 @@ ZONE_CONFIG = {
     'min_base_candles': 1,
     'max_base_candles': 6,
     'optimal_base_candles': 3,
-    'min_legout_ratio': 2.0,
+    'min_legout_ratio': 1.5,
     'min_leg_strength': 0.5,
     'max_base_retracement': 0.3,
-    'min_pattern_pips': 50,
+    'min_pattern_pips': 10,
     'pip_value': 0.0001,
     'pattern_types': ['D-B-D', 'R-B-R'],
     'focus_patterns': ['D-B-D', 'R-B-R']  # Momentum patterns priority
