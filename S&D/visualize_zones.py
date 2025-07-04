@@ -1,18 +1,19 @@
 """
-Zone Visualization Tool with Candlesticks
-Visual validation of detected D-B-D and R-B-R patterns
+Clean Zone Visualization Tool - Module 2 Debug (WORKING VERSION)
+Clear visualization with non-overlapping labels and visible candles
 """
 
 import matplotlib.pyplot as plt
 import pandas as pd
 from matplotlib.patches import Rectangle
+import numpy as np
 from modules.data_loader import DataLoader
 from modules.candle_classifier import CandleClassifier
 from modules.zone_detector import ZoneDetector
-from config.settings import ZONE_CONFIG, CANDLE_THRESHOLDS
+from config.settings import ZONE_CONFIG
 
 def plot_candlesticks(ax, data, start_idx=0):
-    """Plot candlestick chart"""
+    """Plot clean candlestick chart"""
     
     for i, (idx, candle) in enumerate(data.iterrows()):
         x = start_idx + i
@@ -23,257 +24,253 @@ def plot_candlesticks(ax, data, start_idx=0):
         
         # Determine candle color
         if close_price >= open_price:
-            color = 'green'  # Bullish candle
+            color = 'green'
+            alpha = 0.7
             body_bottom = open_price
             body_top = close_price
         else:
-            color = 'red'    # Bearish candle
+            color = 'red'
+            alpha = 0.7
             body_bottom = close_price
             body_top = open_price
         
         # Draw the wick (high-low line)
-        ax.plot([x, x], [low_price, high_price], color='black', linewidth=1)
+        ax.plot([x, x], [low_price, high_price], color='black', linewidth=1.5, alpha=0.8)
         
         # Draw the body (rectangle)
         body_height = abs(close_price - open_price)
-        if body_height > 0:  # Avoid zero-height rectangles
-            rect = Rectangle((x - 0.3, body_bottom), 0.6, body_height, 
-                           facecolor=color, edgecolor='black', linewidth=0.5)
+        if body_height > 0:
+            rect = Rectangle((x - 0.35, body_bottom), 0.7, body_height, 
+                           facecolor=color, edgecolor='black', linewidth=0.8, alpha=alpha)
             ax.add_patch(rect)
         else:
             # Doji candle (open = close)
-            ax.plot([x - 0.3, x + 0.3], [open_price, open_price], color='black', linewidth=2)
+            ax.plot([x - 0.35, x + 0.35], [open_price, open_price], color='black', linewidth=2)
 
-def visualize_zones_candlesticks():
-    """Visualize detected zones on candlestick chart"""
+def visualize_zones_simple():
+    """Simple zone visualization to test if basic functionality works"""
     
-    # Load data
-    print("📊 Loading EURUSD data...")
-    data_loader = DataLoader()
-    data = data_loader.load_pair_data('EURUSD', 'Daily')
+    print("🕯️  SIMPLE ZONE VISUALIZATION - TESTING")
+    print("=" * 50)
     
-    # Initialize components
-    candle_classifier = CandleClassifier(data)
-    zone_detector = ZoneDetector(candle_classifier, ZONE_CONFIG)
-    
-    # Use a smaller sample for visualization (last 100 candles for clarity)
-    sample_data = data.tail(100).copy()
-    sample_data.reset_index(drop=True, inplace=True)
-    
-    print(f"🔍 Analyzing {len(sample_data)} candles for visualization...")
-    
-    # Detect patterns
-    patterns = zone_detector.detect_all_patterns(sample_data)
-    
-    print(f"📈 Found {patterns['total_patterns']} patterns to visualize")
-    
-    # Create the plot
-    fig, ax = plt.subplots(figsize=(16, 10))
-    
-    # Plot candlesticks
-    plot_candlesticks(ax, sample_data)
-    
-    # Plot D-B-D zones (red/bearish)
-    for i, pattern in enumerate(patterns['dbd_patterns']):
-        start_idx = pattern['start_idx']
-        end_idx = pattern['end_idx']
-        zone_high = pattern['zone_high']
-        zone_low = pattern['zone_low']
-        strength = pattern['strength']
+    try:
+        # Load data
+        print("📊 Loading EURUSD data...")
+        data_loader = DataLoader()
+        data = data_loader.load_pair_data('EURUSD', 'H12')
         
-        # Draw zone rectangle
-        width = end_idx - start_idx + 1
-        rect = Rectangle((start_idx - 0.5, zone_low), width, zone_high - zone_low, 
-                        facecolor='red', alpha=0.2, edgecolor='red', linewidth=2, linestyle='--')
-        ax.add_patch(rect)
+        # Initialize components
+        candle_classifier = CandleClassifier(data)
+        zone_detector = ZoneDetector(candle_classifier, ZONE_CONFIG)
         
-        # Add strength label
-        ax.text(start_idx + width/2, zone_high + (sample_data['high'].max() - sample_data['low'].min()) * 0.01, 
-               f'D-B-D\n{strength:.3f}', 
-               ha='center', va='bottom', fontsize=9, color='darkred', weight='bold',
-               bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+        print("✅ Components initialized successfully")
         
-        # Draw zone boundary lines
-        ax.plot([start_idx - 0.5, end_idx + 0.5], [zone_high, zone_high], 
-               color='red', linewidth=2, linestyle='-', alpha=0.8)
-        ax.plot([start_idx - 0.5, end_idx + 0.5], [zone_low, zone_low], 
-               color='red', linewidth=2, linestyle='-', alpha=0.8)
-    
-    # Plot R-B-R zones (blue/bullish)
-    for i, pattern in enumerate(patterns['rbr_patterns']):
-        start_idx = pattern['start_idx']
-        end_idx = pattern['end_idx']
-        zone_high = pattern['zone_high']
-        zone_low = pattern['zone_low']
-        strength = pattern['strength']
+        # Use smaller sample for testing
+        sample_size = 150
+        sample_data = data.tail(sample_size).copy()
+        sample_data.reset_index(drop=True, inplace=True)
         
-        # Draw zone rectangle
-        width = end_idx - start_idx + 1
-        rect = Rectangle((start_idx - 0.5, zone_low), width, zone_high - zone_low, 
-                        facecolor='blue', alpha=0.2, edgecolor='blue', linewidth=2, linestyle='--')
-        ax.add_patch(rect)
+        print(f"🔍 Analyzing {len(sample_data)} candles...")
         
-        # Add strength label
-        ax.text(start_idx + width/2, zone_low - (sample_data['high'].max() - sample_data['low'].min()) * 0.015, 
-               f'R-B-R\n{strength:.3f}', 
-               ha='center', va='top', fontsize=9, color='darkblue', weight='bold',
-               bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8))
+        # Try to detect patterns
+        patterns = zone_detector.detect_all_patterns(sample_data)
         
-        # Draw zone boundary lines
-        ax.plot([start_idx - 0.5, end_idx + 0.5], [zone_high, zone_high], 
-               color='blue', linewidth=2, linestyle='-', alpha=0.8)
-        ax.plot([start_idx - 0.5, end_idx + 0.5], [zone_low, zone_low], 
-               color='blue', linewidth=2, linestyle='-', alpha=0.8)
-    
-    # Formatting with enhanced X-axis labeling
-    ax.set_title(f'EURUSD Supply & Demand Zones - Candlestick Analysis\n{patterns["total_patterns"]} patterns detected', 
-                fontsize=16, weight='bold', pad=20)
-    ax.set_xlabel('Candle Index (Most Recent 100 Daily Candles)', fontsize=12)
-    ax.set_ylabel('Price Level', fontsize=12)
+        total_patterns = patterns['total_patterns']
+        print(f"📈 Found {total_patterns} patterns")
+        
+        # Create basic plot
+        fig, ax = plt.subplots(figsize=(18, 8))
+        
+        # Plot candlesticks
+        plot_candlesticks(ax, sample_data)
+        
+        # Plot zones with minimal labels
+        pattern_count = 0
+        
+        # Plot D-B-D zones
+        for i, pattern in enumerate(patterns['dbd_patterns']):
+            pattern_count += 1
+            
+            start_idx = pattern['start_idx']
+            end_idx = pattern['end_idx']
+            zone_high = pattern['zone_high']
+            zone_low = pattern['zone_low']
+            strength = pattern['strength']
+            
+            # Simple zone rectangle
+            width = end_idx - start_idx + 1
+            rect = Rectangle((start_idx - 0.5, zone_low), width, zone_high - zone_low, 
+                            facecolor='red', alpha=0.15, edgecolor='darkred', linewidth=2)
+            ax.add_patch(rect)
+            
+            # Simple label
+            label_x = start_idx + width/2
+            label_y = zone_high + (sample_data['high'].max() - sample_data['low'].min()) * 0.02
+            
+            ax.text(label_x, label_y, f'D-B-D #{i+1}\nS:{strength:.2f}', 
+                   ha='center', va='bottom', fontsize=8, color='darkred', weight='bold',
+                   bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8))
+        
+        # Plot R-B-R zones
+        for i, pattern in enumerate(patterns['rbr_patterns']):
+            pattern_count += 1
+            
+            start_idx = pattern['start_idx']
+            end_idx = pattern['end_idx']
+            zone_high = pattern['zone_high']
+            zone_low = pattern['zone_low']
+            strength = pattern['strength']
+            
+            # Simple zone rectangle
+            width = end_idx - start_idx + 1
+            rect = Rectangle((start_idx - 0.5, zone_low), width, zone_high - zone_low, 
+                            facecolor='blue', alpha=0.15, edgecolor='darkblue', linewidth=2)
+            ax.add_patch(rect)
+            
+            # Simple label
+            label_x = start_idx + width/2
+            label_y = zone_low - (sample_data['high'].max() - sample_data['low'].min()) * 0.02
+            
+            ax.text(label_x, label_y, f'R-B-R #{i+1}\nS:{strength:.2f}', 
+                   ha='center', va='top', fontsize=8, color='darkblue', weight='bold',
+                   bbox=dict(boxstyle='round,pad=0.2', facecolor='white', alpha=0.8))
+        
+        # Basic formatting
+        ax.set_title(f'EURUSD Zones - {total_patterns} patterns detected', fontsize=14, weight='bold')
+        ax.set_xlabel('Candle Index', fontsize=12)
+        ax.set_ylabel('Price Level', fontsize=12)
+        
+        # Simple X-axis
+        major_ticks = list(range(0, len(sample_data), 10))
+        ax.set_xticks(major_ticks)
+        ax.set_xticklabels([f'#{x}' for x in major_ticks])
+        
+        ax.grid(True, alpha=0.3)
+        
+        plt.tight_layout()
+        plt.savefig('results/zone_test.png', dpi=200, bbox_inches='tight')
+        plt.show()
+        
+        print(f"✅ Successfully plotted {total_patterns} patterns")
+        
+        # Print basic pattern info
+        print(f"\n📋 PATTERN SUMMARY:")
+        print(f"   D-B-D patterns: {len(patterns['dbd_patterns'])}")
+        print(f"   R-B-R patterns: {len(patterns['rbr_patterns'])}")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error in visualization: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
 
-    # Set major X-axis ticks every 5 candles with clear labels
-    major_ticks = list(range(0, len(sample_data), 5))
-    ax.set_xticks(major_ticks)
-    ax.set_xticklabels([f'#{x}' for x in major_ticks], fontsize=10)
+def debug_zone_detector():
+    """Debug zone detector step by step"""
+    
+    print("\n🔍 DEBUGGING ZONE DETECTOR...")
+    print("=" * 50)
+    
+    try:
+        # Load data
+        data_loader = DataLoader()
+        data = data_loader.load_pair_data('EURUSD', 'Daily')
+        sample_data = data.tail(50).copy()  # Very small sample
+        sample_data.reset_index(drop=True, inplace=True)
+        
+        print(f"✅ Loaded {len(sample_data)} candles")
+        
+        # Test candle classifier
+        candle_classifier = CandleClassifier(sample_data)
+        classified_data = candle_classifier.classify_all_candles()
+        
+        print(f"✅ Candle classification complete")
+        print(f"   Base: {(classified_data['candle_type'] == 'base').sum()}")
+        print(f"   Decisive: {(classified_data['candle_type'] == 'decisive').sum()}")
+        print(f"   Explosive: {(classified_data['candle_type'] == 'explosive').sum()}")
+        
+        # Test zone detector
+        zone_detector = ZoneDetector(candle_classifier, ZONE_CONFIG)
+        print(f"✅ Zone detector initialized")
+        
+        # Try pattern detection
+        patterns = zone_detector.detect_all_patterns(sample_data)
+        print(f"✅ Pattern detection complete: {patterns['total_patterns']} patterns")
+        
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error in zone detector: {str(e)}")
+        import traceback
+        traceback.print_exc()
+        return False
 
-    # Add minor ticks every candle
-    minor_ticks = list(range(0, len(sample_data), 1))
-    ax.set_xticks(minor_ticks, minor=True)
-
-    # Enhanced grid system
-    ax.grid(True, alpha=0.4, linestyle='-', linewidth=0.8)  # Major grid every 5
-    ax.grid(True, alpha=0.15, linestyle='-', which='minor', linewidth=0.3)  # Minor grid every candle
-
-    # Rotate x-axis labels for better readability
-    plt.setp(ax.get_xticklabels(), rotation=0, ha='center')
+def debug_specific_candles(data, candle_indices):
+    """Debug specific candles mentioned in validation"""
     
-    # Custom legend
-    legend_elements = [
-        plt.Rectangle((0, 0), 1, 1, facecolor='green', edgecolor='black', label='Bullish Candle'),
-        plt.Rectangle((0, 0), 1, 1, facecolor='red', edgecolor='black', label='Bearish Candle'),
-        plt.Rectangle((0, 0), 1, 1, facecolor='red', alpha=0.3, edgecolor='red', linestyle='--', label='D-B-D Zone'),
-        plt.Rectangle((0, 0), 1, 1, facecolor='blue', alpha=0.3, edgecolor='blue', linestyle='--', label='R-B-R Zone')
-    ]
-    ax.legend(handles=legend_elements, loc='upper left', fontsize=10)
+    classifier = CandleClassifier(data)
     
-    # Add statistics box
-    summary = zone_detector.get_pattern_summary(patterns)
-    stats_text = f"""Zone Detection Statistics:
-D-B-D Zones: {len(patterns['dbd_patterns'])}
-R-B-R Zones: {len(patterns['rbr_patterns'])}
-Average Strength: {summary['avg_strength']:.3f}
-High Quality (≥0.8): {summary['strength_distribution']['high']}
-Medium Quality (0.5-0.8): {summary['strength_distribution']['medium']}
-Pattern Density: {patterns['total_patterns']/len(sample_data)*100:.1f}%"""
+    print(f"\n🔍 DEBUGGING SPECIFIC CANDLES: {candle_indices}")
+    print("=" * 60)
     
-    ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, fontsize=10,
-           verticalalignment='top', 
-           bbox=dict(boxstyle='round,pad=0.5', facecolor='lightyellow', alpha=0.9))
-    
-    # Adjust layout and display
-    plt.tight_layout()
-    plt.subplots_adjust(top=0.93)
-    
-    # Save the chart
-    plt.savefig('results/zone_detection_candlesticks.png', dpi=300, bbox_inches='tight')
-    print("💾 Chart saved to results/zone_detection_candlesticks.png")
-    
-    plt.show()
-    
-    # Print detailed pattern analysis
-    print_pattern_details(patterns, sample_data)
-
-def print_pattern_details(patterns, sample_data):
-    """Print detailed pattern information"""
-    
-    print("\n" + "="*70)
-    print("DETAILED CANDLESTICK PATTERN ANALYSIS")
-    print("="*70)
-    
-    if patterns['dbd_patterns']:
-        print("\n📉 DROP-BASE-DROP (SUPPLY) ZONES:")
-        print("-" * 50)
-        for i, pattern in enumerate(patterns['dbd_patterns'], 1):
-            range_pips = pattern['zone_range'] * 10000
-            print(f"  🔴 D-B-D Zone #{i}:")
-            print(f"     📍 Location: Candles {pattern['start_idx']} to {pattern['end_idx']}")
-            print(f"     📊 Price Range: {pattern['zone_low']:.5f} - {pattern['zone_high']:.5f}")
-            print(f"     📏 Zone Size: {range_pips:.1f} pips")
-            print(f"     ⭐ Strength Score: {pattern['strength']:.3f}")
-            print(f"     🎯 Base Candles: {pattern['base']['candle_count']}")
-            print(f"     🚀 Leg-out Ratio: {pattern['leg_out']['ratio_to_base']:.2f}x base size")
+    for idx in candle_indices:
+        if idx < len(data):
+            candle = data.iloc[idx]
+            
+            # Manual calculation
+            body_size = abs(candle['close'] - candle['open'])
+            total_range = candle['high'] - candle['low']
+            ratio = body_size / total_range if total_range > 0 else 0
+            
+            # Classifier result
+            classification = classifier.classify_single_candle(
+                candle['open'], candle['high'], candle['low'], candle['close']
+            )
+            
+            # Determine expected classification
+            if ratio <= 0.50:
+                expected = 'base'
+            elif ratio > 0.80:
+                expected = 'explosive'
+            else:
+                expected = 'decisive'
+            
+            direction = 'Bullish' if candle['close'] > candle['open'] else 'Bearish'
+            
+            print(f"Candle #{idx}:")
+            print(f"  OHLC: {candle['open']:.5f}, {candle['high']:.5f}, {candle['low']:.5f}, {candle['close']:.5f}")
+            print(f"  Body: {body_size:.5f} | Range: {total_range:.5f}")
+            print(f"  Body/Range Ratio: {ratio:.3f} ({ratio*100:.1f}%)")
+            print(f"  Expected: {expected} | Got: {classification} {'✅' if expected == classification else '❌'}")
+            print(f"  Direction: {direction}")
             print()
-    
-    if patterns['rbr_patterns']:
-        print("\n📈 RALLY-BASE-RALLY (DEMAND) ZONES:")
-        print("-" * 50)
-        for i, pattern in enumerate(patterns['rbr_patterns'], 1):
-            range_pips = pattern['zone_range'] * 10000
-            print(f"  🔵 R-B-R Zone #{i}:")
-            print(f"     📍 Location: Candles {pattern['start_idx']} to {pattern['end_idx']}")
-            print(f"     📊 Price Range: {pattern['zone_low']:.5f} - {pattern['zone_high']:.5f}")
-            print(f"     📏 Zone Size: {range_pips:.1f} pips")
-            print(f"     ⭐ Strength Score: {pattern['strength']:.3f}")
-            print(f"     🎯 Base Candles: {pattern['base']['candle_count']}")
-            print(f"     🚀 Leg-out Ratio: {pattern['leg_out']['ratio_to_base']:.2f}x base size")
-            print()
-
-def debug_specific_obvious_pattern():
-    """Debug the obvious pattern at candles 38-41"""
-    
-    # Load data
-    data_loader = DataLoader()
-    data = data_loader.load_pair_data('EURUSD', 'Daily')
-    candle_classifier = CandleClassifier(data)
-    zone_detector = ZoneDetector(candle_classifier, ZONE_CONFIG)
-    
-    sample_data = data.tail(100).copy()
-    sample_data.reset_index(drop=True, inplace=True)
-    
-    print("🔍 DEBUGGING OBVIOUS PATTERN: Candles 38-41")
-    print("="*60)
-    
-    # Show the specific candles
-    pattern_candles = sample_data.iloc[38:42]
-    print("\n📊 CANDLE DATA:")
-    for i, (idx, candle) in enumerate(pattern_candles.iterrows()):
-        candle_idx = 38 + i
-        direction = "🟢 UP" if candle['close'] > candle['open'] else "🔴 DOWN"
-        classification = candle_classifier.classify_single_candle(
-            candle['open'], candle['high'], candle['low'], candle['close']
-        )
-        print(f"   Candle {candle_idx}: {direction} | {classification} | O={candle['open']:.5f} C={candle['close']:.5f}")
-    
-    # Test each component manually
-    print(f"\n🔵 TESTING LEG-IN (Candle 38):")
-    leg_in_data = sample_data.iloc[38:39]  # Just candle 38
-    leg_in_result = zone_detector.is_valid_leg(leg_in_data, 'bullish')
-    print(f"   Single candle leg-in valid: {leg_in_result}")
-    
-    # Test leg-in detection function
-    leg_in = zone_detector.identify_leg_in(sample_data, 38, 'bullish')
-    print(f"   identify_leg_in result: {leg_in}")
-
-    print(f"\n🧪 TESTING FIXED LEG-IN:")
-    # Test just candle 38 as leg-in
-    single_leg = sample_data.iloc[38:39]
-    print(f"   Candle 38 alone - Range: {single_leg['high'].max() - single_leg['low'].min():.5f}")
-    print(f"   Candle 38 alone - Net movement: {single_leg['close'].iloc[0] - single_leg['open'].iloc[0]:.5f}")
-
-    # Check if candle 39 looks like base relative to 38
-    candle_38_high = sample_data.iloc[38]['high']
-    candle_38_low = sample_data.iloc[38]['low']
-    candle_39 = sample_data.iloc[39]
-    print(f"   Candle 39 within 38's range: {candle_39['low'] >= candle_38_low * 0.98 and candle_39['high'] <= candle_38_high * 1.02}")
-    
 
 if __name__ == "__main__":
-    print("🕯️  CANDLESTICK ZONE VISUALIZATION TOOL")
-    print("="*50)
-    visualize_zones_candlesticks()
+    print("🎯 ZONE VISUALIZATION - TESTING MODE")
+    print("=" * 60)
     
-    # Add debug for missed pattern
-    print("\n" + "🚨"*20)
-    debug_specific_obvious_pattern()
+    # Step 1: Test zone detector
+    if debug_zone_detector():
+        print("\n✅ Zone detector working, trying visualization...")
+        
+        # Step 2: Try simple visualization
+        if visualize_zones_simple():
+            print("\n✅ Basic visualization successful!")
+            
+            # Step 3: Debug specific candles
+            print("\n🔍 DEBUGGING PROBLEMATIC CANDLES...")
+            data_loader = DataLoader()
+            data = data_loader.load_pair_data('EURUSD', 'Daily')
+            sample_data = data.tail(150).copy()
+            sample_data.reset_index(drop=True, inplace=True)
+            
+            problematic_candles = [73, 77, 78, 99, 110]
+            debug_specific_candles(sample_data, problematic_candles)
+            
+        else:
+            print("\n❌ Visualization failed")
+    else:
+        print("\n❌ Zone detector failed")
     
-    print("\n✅ Visualization complete!")
+    print("\n📊 Check results/zone_test.png if successful")

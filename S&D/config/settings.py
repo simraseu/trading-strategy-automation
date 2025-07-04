@@ -16,14 +16,14 @@ CANDLE_THRESHOLDS = {
 ZONE_PARAMETERS = {
     'max_base_candles': 6,        # Maximum base candles (1-6 range)
     'ideal_base_candles': 3,      # Sweet spot (1-3 highest probability)
-    'min_leg_out_ratio': 2.0,     # Leg-out must be 2x base size
+    'min_leg_out_ratio': 1.5,     # Leg-out must be 2x base size
     'min_leg_strength': 2         # Minimum decisive/explosive candles in leg
 }
 
 # DATA SETTINGS - ADAPTED FOR YOUR FILE STRUCTURE
 DATA_SETTINGS = {
     'primary_pairs': ['EURUSD', 'GBPUSD', 'USDJPY', 'CADJPY'],
-    'timeframes': ['Daily', 'Weekly'],
+    'timeframes': ['Daily', 'Weekly', 'H12', 'H4'],
     'required_history': 500,      # Minimum candles needed
     'validation_threshold': 0.95, # 95% accuracy requirement
     'data_source': 'MetaTrader'   # Your data source format
@@ -43,7 +43,10 @@ PATHS = {
 # DATA FILE PATTERNS - FOR YOUR METATRADER FORMAT
 FILE_PATTERNS = {
     'daily': '{pair}.raw_Daily_*.csv',
-    'weekly': '{pair}.raw_Weekly_*.csv'
+    'weekly': '{pair}.raw_Weekly_*.csv',
+    'h12': '{pair}.raw_H12_*.csv',
+    'h8': '{pair}.raw_H8_*.csv',
+    'h4': '{pair}.raw_H4_*.csv'
 }
 
 # COLUMN MAPPING - FOR YOUR CSV FORMAT

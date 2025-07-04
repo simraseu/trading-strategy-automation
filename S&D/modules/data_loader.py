@@ -21,7 +21,7 @@ class DataLoader:
         
         Args:
             pair: Currency pair (e.g., 'EURUSD')
-            timeframe: 'Daily' or 'Weekly'
+            timeframe: 'Daily', 'Weekly', 'H12', 'H8' or 'H4'
             
         Returns:
             DataFrame with standardized OHLC data
@@ -29,12 +29,19 @@ class DataLoader:
         print(f"📊 Loading {pair} {timeframe} data...")
         
         # Find the file using pattern matching
-        if timeframe.lower() == 'daily':
+        timeframe_lower = timeframe.lower()
+        if timeframe_lower == 'daily':
             pattern = f"{pair}.raw_Daily_*.csv"
-        elif timeframe.lower() == 'weekly':
+        elif timeframe_lower == 'weekly':
             pattern = f"{pair}.raw_Weekly_*.csv"
+        elif timeframe_lower == 'h12':
+            pattern = f"{pair}.raw_H12_*.csv"
+        elif timeframe_lower == 'h8':
+            pattern = f"{pair}.raw_H8_*.csv"
+        elif timeframe_lower == 'h4':
+            pattern = f"{pair}.raw_H4_*.csv"
         else:
-            raise ValueError(f"Unsupported timeframe: {timeframe}")
+            raise ValueError(f"Unsupported timeframe: {timeframe}. Supported: Daily, Weekly, H12, H8, H4")
         
         # Search for files matching the pattern
         search_pattern = os.path.join(self.raw_path, pattern)

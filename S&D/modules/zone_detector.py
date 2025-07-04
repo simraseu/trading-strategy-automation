@@ -1,5 +1,5 @@
 """
-Zone Detection Engine - Module 2
+Zone Detection Engine - Module 2 (PROFESSIONAL COMPLETE)
 Detects Drop-Base-Drop (D-B-D) and Rally-Base-Rally (R-B-R) patterns
 Author: Trading Strategy Automation Project
 """
@@ -8,7 +8,25 @@ import pandas as pd
 import numpy as np
 from typing import List, Dict, Optional, Tuple
 import logging
-from config.settings import ZONE_CONFIG
+import sys
+import os
+
+# CRITICAL FIX: Add path to find config module
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Import with fallback
+try:
+    from config.settings import ZONE_CONFIG
+except ImportError:
+    # Fallback configuration if import fails
+    ZONE_CONFIG = {
+        'min_base_candles': 1,
+        'max_base_candles': 6,
+        'min_legout_ratio': 1.5,
+        'min_pattern_pips': 20,
+        'pip_value': 0.0001
+    }
+    print("⚠️  Using fallback ZONE_CONFIG")
 
 class ZoneDetector:
     """
@@ -61,7 +79,7 @@ class ZoneDetector:
     
     def detect_dbd_patterns(self, data: pd.DataFrame) -> List[Dict]:
         """
-        Detect Drop-Base-Drop patterns
+        Enhanced D-B-D detection with zone invalidation
         
         Args:
             data: DataFrame with OHLC data
@@ -71,22 +89,21 @@ class ZoneDetector:
         """
         patterns = []
         
-        # Need minimum 7 candles for pattern (2 leg-in + 1 base + 2 leg-out + buffer)
-        for i in range(len(data) - 7):
+        for i in range(len(data) - 4):
             try:
                 # Phase 1: Identify bearish leg-in
                 leg_in = self.identify_leg_in(data, i, direction='bearish')
                 if not leg_in:
                     continue
                 
-                # Phase 2: Identify base consolidation
-                base = self.identify_base(data, leg_in['end_idx'])
+                # Phase 2: Identify base consolidation (start AFTER leg-in)
+                base = self.identify_base(data, leg_in['end_idx'] + 1)
                 if not base:
                     continue
                 
-                # Phase 3: Validate bearish leg-out
-                leg_out = self.validate_leg_out(data, base['end_idx'], 
-                                               base['range'], direction='bearish')
+                # Phase 3: Validate bearish leg-out (start AFTER base)
+                leg_out = self.validate_leg_out(data, base['end_idx'] + 1, 
+                                            base['range'], direction='bearish')
                 if not leg_out:
                     continue
                 
@@ -98,11 +115,19 @@ class ZoneDetector:
                     'leg_in': leg_in,
                     'base': base,
                     'leg_out': leg_out,
-                    'strength': self.calculate_pattern_strength(leg_in, base, leg_out),
                     'zone_high': base['high'],
                     'zone_low': base['low'],
                     'zone_range': base['range']
                 }
+                
+                # CRITICAL: Validate pattern integrity (check for invalidating candles)
+                is_valid, validation_msg = self.validate_zone_integrity(pattern, data)
+                if not is_valid:
+                    self.logger.debug(f"D-B-D pattern at {i} rejected: {validation_msg}")
+                    continue
+                
+                # Calculate strength
+                pattern['strength'] = self.calculate_pattern_strength(leg_in, base, leg_out)
                 
                 patterns.append(pattern)
                 
@@ -114,7 +139,7 @@ class ZoneDetector:
     
     def detect_rbr_patterns(self, data: pd.DataFrame) -> List[Dict]:
         """
-        Detect Rally-Base-Rally patterns
+        Enhanced R-B-R detection with zone invalidation
         
         Args:
             data: DataFrame with OHLC data
@@ -124,21 +149,21 @@ class ZoneDetector:
         """
         patterns = []
         
-        for i in range(len(data) - 7):
+        for i in range(len(data) - 4):
             try:
                 # Phase 1: Identify bullish leg-in
                 leg_in = self.identify_leg_in(data, i, direction='bullish')
                 if not leg_in:
                     continue
                 
-                # Phase 2: Identify base consolidation
-                base = self.identify_base(data, leg_in['end_idx'])
+                # Phase 2: Identify base consolidation (start AFTER leg-in)
+                base = self.identify_base(data, leg_in['end_idx'] + 1)
                 if not base:
                     continue
                 
-                # Phase 3: Validate bullish leg-out
-                leg_out = self.validate_leg_out(data, base['end_idx'], 
-                                               base['range'], direction='bullish')
+                # Phase 3: Validate bullish leg-out (start AFTER base)
+                leg_out = self.validate_leg_out(data, base['end_idx'] + 1, 
+                                            base['range'], direction='bullish')
                 if not leg_out:
                     continue
                 
@@ -150,11 +175,19 @@ class ZoneDetector:
                     'leg_in': leg_in,
                     'base': base,
                     'leg_out': leg_out,
-                    'strength': self.calculate_pattern_strength(leg_in, base, leg_out),
                     'zone_high': base['high'],
                     'zone_low': base['low'],
                     'zone_range': base['range']
                 }
+                
+                # CRITICAL: Validate pattern integrity (check for invalidating candles)
+                is_valid, validation_msg = self.validate_zone_integrity(pattern, data)
+                if not is_valid:
+                    self.logger.debug(f"R-B-R pattern at {i} rejected: {validation_msg}")
+                    continue
+                
+                # Calculate strength
+                pattern['strength'] = self.calculate_pattern_strength(leg_in, base, leg_out)
                 
                 patterns.append(pattern)
                 
@@ -164,84 +197,53 @@ class ZoneDetector:
         
         return patterns
     
-    def identify_leg_in(self, data: pd.DataFrame, start_idx: int, 
-                    direction: str) -> Optional[Dict]:
+    def identify_leg_in(self, data: pd.DataFrame, start_idx: int, direction: str) -> Optional[Dict]:
         """
-        FIXED: Identify strong momentum leg into base - STOP at consolidation
+        Identify leg-in with flexible requirements (can be >50%)
         """
-        max_leg_length = 5  # Maximum candles to check for leg-in
+        max_leg_length = 3
         
-        for leg_length in range(1, max_leg_length + 1):  # Start with 1 candle, not 2
-            end_idx = start_idx + leg_length - 1  # Fix off-by-one error
+        for leg_length in range(1, max_leg_length + 1):
+            end_idx = start_idx + leg_length - 1
             
             if end_idx >= len(data):
                 break
             
             leg_data = data.iloc[start_idx:end_idx + 1]
             
-            # Check if this forms a valid leg-in
-            if self.is_valid_leg(leg_data, direction):
+            if self.is_valid_leg_in(leg_data, direction):
                 leg_range = self.calculate_leg_range(leg_data, direction)
                 
-                # Check minimum strength requirement
-                if leg_range < self.config['min_pattern_pips'] * self.config['pip_value']:
+                # Minimum requirement (20 pips)
+                min_range = 20 * 0.0001
+                if leg_range < min_range:
                     continue
                 
-                # CRITICAL FIX: Check if the NEXT candle looks like a base
-                # Don't extend the leg if the next candle is consolidation
-                if end_idx + 1 < len(data):
-                    next_candle = data.iloc[end_idx + 1]
-                    current_high = leg_data['high'].max()
-                    current_low = leg_data['low'].min()
-                    
-                    # If next candle stays within the leg range, this might be a good stopping point
-                    if (next_candle['high'] <= current_high * 1.02 and 
-                        next_candle['low'] >= current_low * 0.98):
-                        # Next candle looks like consolidation, stop here
-                        return {
-                            'start_idx': start_idx,
-                            'end_idx': end_idx,
-                            'direction': direction,
-                            'range': leg_range,
-                            'strength': self.calculate_leg_strength(leg_data, direction),
-                            'candle_count': leg_length
-                        }
-                
-                # If we reach max length or end of data, return what we have
-                if leg_length >= 3:  # Don't let legs get too long
-                    return {
-                        'start_idx': start_idx,
-                        'end_idx': end_idx,
-                        'direction': direction,
-                        'range': leg_range,
-                        'strength': self.calculate_leg_strength(leg_data, direction),
-                        'candle_count': leg_length
-                    }
+                return {
+                    'start_idx': start_idx,
+                    'end_idx': end_idx,
+                    'direction': direction,
+                    'range': leg_range,
+                    'strength': self.calculate_leg_strength(leg_data, direction),
+                    'candle_count': leg_length
+                }
         
         return None
     
     def identify_base(self, data: pd.DataFrame, start_idx: int) -> Optional[Dict]:
         """
-        Identify base consolidation after leg-in
-        
-        Args:
-            data: DataFrame with OHLC data
-            start_idx: Starting index for base search
-            
-        Returns:
-            Base information or None if not found
+        Identify base consolidation - ALL candles must be ≤50% (base classification)
         """
         max_base_length = self.config['max_base_candles']
         
-        for base_length in range(self.config['min_base_candles'], max_base_length + 1):
-            end_idx = start_idx + base_length
+        for base_length in range(1, max_base_length + 1):
+            end_idx = start_idx + base_length - 1
             
             if end_idx >= len(data):
                 break
             
             base_data = data.iloc[start_idx:end_idx + 1]
             
-            # Check if this forms a valid base
             if self.is_valid_base(base_data):
                 base_high = base_data['high'].max()
                 base_low = base_data['low'].min()
@@ -262,33 +264,25 @@ class ZoneDetector:
     def validate_leg_out(self, data: pd.DataFrame, start_idx: int, 
                          base_range: float, direction: str) -> Optional[Dict]:
         """
-        Validate leg-out meets minimum requirements
-        
-        Args:
-            data: DataFrame with OHLC data
-            start_idx: Starting index for leg-out search
-            base_range: Range of the base consolidation
-            direction: 'bullish' or 'bearish'
-            
-        Returns:
-            Leg-out information or None if not valid
+        Validate leg-out - must have >70% body-to-range requirement
         """
-        max_leg_length = 5  # Maximum candles to check for leg-out
-        min_leg_out_range = base_range * self.config['min_legout_ratio']
+        max_leg_length = 5
+        min_leg_out_range = base_range * 1.5
         
         for leg_length in range(1, max_leg_length + 1):
-            end_idx = start_idx + leg_length
+            end_idx = start_idx + leg_length - 1
             
             if end_idx >= len(data):
                 break
             
             leg_data = data.iloc[start_idx:end_idx + 1]
             
-            # Check if this forms a valid leg-out
-            if self.is_valid_leg(leg_data, direction):
+            # Check basic leg validity and >70% requirement
+            if (self.is_valid_leg_in(leg_data, direction) and 
+                self.is_valid_leg_out_strength(leg_data, direction)):
+                
                 leg_range = self.calculate_leg_range(leg_data, direction)
                 
-                # Check minimum leg-out requirement (2x base range)
                 if leg_range >= min_leg_out_range:
                     return {
                         'start_idx': start_idx,
@@ -302,114 +296,172 @@ class ZoneDetector:
         
         return None
     
-    def is_valid_leg(self, leg_data: pd.DataFrame, direction: str) -> bool:
-        """FIXED leg validation - allow single strong candles"""
-        
-        # For single candles, be more lenient
+    def is_valid_leg_in(self, leg_data: pd.DataFrame, direction: str) -> bool:
+        """
+        Leg-in validation - flexible requirements (can be >50%)
+        """
+        # For single candles
         if len(leg_data) == 1:
             candle = leg_data.iloc[0]
             
-            # Check if it's a strong candle
-            classification = self.candle_classifier.classify_single_candle(
-                candle['open'], candle['high'], candle['low'], candle['close']
-            )
+            # Check direction
+            if direction == 'bullish':
+                correct_direction = candle['close'] > candle['open']
+            else:
+                correct_direction = candle['close'] < candle['open']
             
-            # Single decisive or explosive candles are valid legs
-            if classification in ['decisive', 'explosive']:
-                if direction == 'bullish':
-                    return candle['close'] > candle['open']
-                else:
-                    return candle['close'] < candle['open']
+            if not correct_direction:
+                return False
             
-            # Even base candles can be valid if they have good net movement
+            # Calculate body ratio
+            body_size = abs(candle['close'] - candle['open'])
             candle_range = candle['high'] - candle['low']
-            net_movement = abs(candle['close'] - candle['open'])
             
-            # If net movement is at least 30% of range, it's a valid leg
-            if candle_range > 0 and (net_movement / candle_range) >= 0.3:
-                if direction == 'bullish':
-                    return candle['close'] > candle['open']
-                else:
-                    return candle['close'] < candle['open']
+            if candle_range == 0:
+                return False
             
-            return False
+            body_ratio = body_size / candle_range
+            return body_ratio > 0.30  # Minimum threshold
         
-        # For multi-candle legs, use existing logic
-        strong_candles = 0
+        # For multi-candle legs
         directional_candles = 0
+        strong_candles = 0
         
         for idx in leg_data.index:
             candle_data = leg_data.loc[idx]
-            classification = self.candle_classifier.classify_single_candle(
-                candle_data['open'], candle_data['high'], 
-                candle_data['low'], candle_data['close']
-            )
             
-            if classification in ['decisive', 'explosive']:
-                strong_candles += 1
-            
+            # Check direction
             if direction == 'bullish' and candle_data['close'] > candle_data['open']:
                 directional_candles += 1
             elif direction == 'bearish' and candle_data['close'] < candle_data['open']:
                 directional_candles += 1
+            
+            # Check body ratio
+            body_size = abs(candle_data['close'] - candle_data['open'])
+            candle_range = candle_data['high'] - candle_data['low']
+            
+            if candle_range > 0:
+                body_ratio = body_size / candle_range
+                if body_ratio > 0.50:
+                    strong_candles += 1
         
-        strength_ratio = strong_candles / len(leg_data)
         direction_ratio = directional_candles / len(leg_data)
+        strength_ratio = strong_candles / len(leg_data)
         
-        if strength_ratio < self.config['min_leg_strength']:
-            return False
-        
-        if direction_ratio < 0.5:
-            return False
-        
-        # Check overall movement
-        if direction == 'bullish':
-            overall_bullish = leg_data['close'].iloc[-1] > leg_data['open'].iloc[0]
-            leg_range = leg_data['high'].max() - leg_data['low'].min()
-            net_movement = leg_data['close'].iloc[-1] - leg_data['open'].iloc[0]
-            return overall_bullish and (net_movement > leg_range * 0.3)
-        else:
-            overall_bearish = leg_data['close'].iloc[-1] < leg_data['open'].iloc[0]
-            leg_range = leg_data['high'].max() - leg_data['low'].min()
-            net_movement = leg_data['open'].iloc[0] - leg_data['close'].iloc[-1]
-            return overall_bearish and (net_movement > leg_range * 0.3)
+        return direction_ratio >= 0.7 and strength_ratio >= 0.5
     
     def is_valid_base(self, base_data: pd.DataFrame) -> bool:
-        """MUCH STRICTER base validation"""
-        
-        # Check range containment (no excessive breakouts)
-        base_high = base_data['high'].max()
-        base_low = base_data['low'].min()
-        base_range = base_high - base_low
-        
-        # Check that it's actually consolidating (not trending)
+        """
+        STRICT: ALL candles must be ≤50% body-to-range (base classification)
+        """
         for idx in base_data.index:
             candle = base_data.loc[idx]
             
-            # Much stricter: body should be small relative to range
+            # Get classification using candle classifier
+            classification = self.candle_classifier.classify_single_candle(
+                candle['open'], candle['high'], candle['low'], candle['close']
+            )
+            
+            # STRICT REQUIREMENT: Must be base classification (≤50%)
+            if classification != 'base':
+                return False
+            
+            # Double-check with manual calculation
             body_size = abs(candle['close'] - candle['open'])
             candle_range = candle['high'] - candle['low']
             
             if candle_range > 0:
                 body_ratio = body_size / candle_range
-                # Base candles should have small bodies (< 70% body-to-range)
-                if body_ratio > 0.7:
+                if body_ratio > 0.50:  # Must be ≤50%
                     return False
-            
-            # No breakouts beyond base range
-            if (candle['high'] > base_high * 1.005 or   # Only 0.5% tolerance
-                candle['low'] < base_low * 0.995):
-                return False
         
-        # Additional check: overall movement should be minimal
+        # Additional consolidation checks
+        base_high = base_data['high'].max()
+        base_low = base_data['low'].min()
+        base_range = base_high - base_low
+        
+        # Check overall movement is minimal
         total_close_movement = abs(base_data['close'].iloc[-1] - base_data['close'].iloc[0])
-        if total_close_movement > base_range * 0.5:  # Close movement shouldn't exceed 50% of range
+        if base_range > 0 and total_close_movement > base_range * 0.5:
             return False
         
         return True
     
+    def is_valid_leg_out_strength(self, leg_data: pd.DataFrame, direction: str) -> bool:
+        """
+        Check leg-out specific >70% body-to-range requirement
+        """
+        for idx in leg_data.index:
+            candle = leg_data.loc[idx]
+            
+            # Check direction
+            if direction == 'bullish':
+                correct_direction = candle['close'] > candle['open']
+            else:
+                correct_direction = candle['close'] < candle['open']
+            
+            if not correct_direction:
+                continue  # Skip counter-trend candles
+            
+            # Calculate body ratio
+            body_size = abs(candle['close'] - candle['open'])
+            candle_range = candle['high'] - candle['low']
+            
+            if candle_range > 0:
+                body_ratio = body_size / candle_range
+                
+                # REQUIREMENT: At least one candle must be >70%
+                if body_ratio > 0.70:
+                    return True
+        
+        return False  # No candle met the >70% requirement
+    
+    def validate_zone_integrity(self, pattern: Dict, data: pd.DataFrame) -> Tuple[bool, str]:
+        """
+        ENHANCED: Check for zone invalidation by opposite-direction decisive/explosive candles
+        """
+        pattern_end = pattern['end_idx']
+        pattern_type = pattern['type']
+        zone_high = pattern['zone_high']
+        zone_low = pattern['zone_low']
+        
+        # Check next 3-10 candles for invalidation
+        validation_window = min(10, len(data) - pattern_end - 1)
+        
+        if validation_window > 0:
+            next_candles = data.iloc[pattern_end + 1:pattern_end + 1 + validation_window]
+            
+            for relative_idx, (idx, candle) in enumerate(next_candles.iterrows()):
+                actual_idx = pattern_end + 1 + relative_idx
+                
+                # Get candle classification
+                classification = self.candle_classifier.classify_single_candle(
+                    candle['open'], candle['high'], candle['low'], candle['close']
+                )
+                
+                # CRITICAL: Check for zone-breaking candles
+                if pattern_type == 'D-B-D':  # Supply zone
+                    is_bullish = candle['close'] > candle['open']
+                    
+                    # Invalidated by decisive/explosive bullish candle that breaks above zone
+                    if (is_bullish and 
+                        classification in ['decisive', 'explosive'] and 
+                        candle['close'] > zone_high):
+                        return False, f"Zone invalidated by bullish {classification} breaking above zone at candle {actual_idx}"
+                
+                elif pattern_type == 'R-B-R':  # Demand zone
+                    is_bearish = candle['close'] < candle['open']
+                    
+                    # Invalidated by decisive/explosive bearish candle that breaks below zone
+                    if (is_bearish and 
+                        classification in ['decisive', 'explosive'] and 
+                        candle['close'] < zone_low):
+                        return False, f"Zone invalidated by bearish {classification} breaking below zone at candle {actual_idx}"
+        
+        return True, "Valid"
+    
     def calculate_leg_range(self, leg_data: pd.DataFrame, direction: str) -> float:
-        """Calculate the range of a leg in the specified direction"""
+        """Calculate the range of a leg"""
         return leg_data['high'].max() - leg_data['low'].min()
     
     def calculate_leg_strength(self, leg_data: pd.DataFrame, direction: str) -> float:
@@ -430,10 +482,8 @@ class ZoneDetector:
     
     def calculate_base_quality(self, base_data: pd.DataFrame) -> float:
         """Calculate quality score for base consolidation"""
-        # Higher score for fewer candles (more compressed)
         candle_count_score = 1.0 / len(base_data)
         
-        # Higher score for tighter range
         base_range = base_data['high'].max() - base_data['low'].min()
         avg_candle_range = base_data.apply(lambda x: x['high'] - x['low'], axis=1).mean()
         range_score = avg_candle_range / base_range if base_range > 0 else 0
@@ -442,17 +492,13 @@ class ZoneDetector:
     
     def calculate_pattern_strength(self, leg_in: Dict, base: Dict, leg_out: Dict) -> float:
         """Calculate overall pattern strength score"""
-        # Combine multiple factors
         leg_in_strength = leg_in['strength']
         base_quality = base['quality_score']
         leg_out_strength = leg_out['strength']
         leg_out_ratio = leg_out['ratio_to_base']
         
-        # Base candle count bonus (fewer is better)
-        base_bonus = 1.0 if base['candle_count'] <= 3 else 0.5
-        
-        # Leg-out ratio bonus
-        ratio_bonus = min(leg_out_ratio / 2.0, 1.0)  # Cap at 1.0
+        base_bonus = 1.0 if base['candle_count'] <= 3 else 0.7
+        ratio_bonus = min(leg_out_ratio / 1.5, 1.0)
         
         strength = (leg_in_strength * 0.3 + 
                    base_quality * 0.2 + 
@@ -462,11 +508,8 @@ class ZoneDetector:
         return round(strength, 3)
     
     def validate_data(self, data: pd.DataFrame) -> None:
-        """Validate input data format - FIXED FOR LOWERCASE COLUMNS"""
+        """Validate input data format"""
         required_columns = ['open', 'high', 'low', 'close']
-        
-        print(f"DEBUG: Looking for columns: {required_columns}")
-        print(f"DEBUG: Available columns: {list(data.columns)}")
         
         for col in required_columns:
             if col not in data.columns:
@@ -490,14 +533,12 @@ class ZoneDetector:
                 'strength_distribution': {}
             }
         
-        # Calculate average strength
         all_strengths = []
         for pattern in patterns['dbd_patterns'] + patterns['rbr_patterns']:
             all_strengths.append(pattern['strength'])
         
         avg_strength = sum(all_strengths) / len(all_strengths)
         
-        # Strength distribution
         high_strength = sum(1 for s in all_strengths if s >= 0.8)
         medium_strength = sum(1 for s in all_strengths if 0.5 <= s < 0.8)
         low_strength = sum(1 for s in all_strengths if s < 0.5)
