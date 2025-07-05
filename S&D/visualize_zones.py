@@ -143,7 +143,7 @@ class EnhancedZoneVisualizer:
         return min(total_score, 100)  # Cap at 100
 
     def create_zone_label(self, ax, pattern, x, y, pattern_num, zone_range):
-        """Create professional zone label with comprehensive info"""
+        """Create professional zone label with comprehensive info and better spacing"""
         
         zone_score = self.calculate_zone_score(pattern)
         
@@ -171,12 +171,12 @@ class EnhancedZoneVisualizer:
             bbox_color = '#E74C3C'  # Red - weak
             text_color = 'white'
             
-        # Create label with better styling
+        # Create label with better styling and spacing
         ax.text(x, y, label_text, 
-               ha='center', va='center', fontsize=9, color=text_color, 
-               weight='bold', family='monospace',
-               bbox=dict(boxstyle='round,pad=0.4', facecolor=bbox_color, 
-                        alpha=0.95, edgecolor='white', linewidth=1.5))
+            ha='center', va='center', fontsize=8, color=text_color, 
+            weight='bold', family='monospace',
+            bbox=dict(boxstyle='round,pad=0.5', facecolor=bbox_color, 
+                        alpha=0.9, edgecolor='white', linewidth=1.2))
 
     def visualize_zones_debug(self, sample_size=100, timeframe='Daily'):
         """DEBUG VISUALIZATION - Shows base zones only, NO FILE CREATION"""
@@ -274,21 +274,30 @@ class EnhancedZoneVisualizer:
                 ax.hlines(zone_low, start_idx - 0.5, end_idx + 0.5, 
                          colors=edge_color, linewidth=2, alpha=0.8)
                 
-                # Simple label positioning (no complex overlap detection for debug)
+                # Enhanced label positioning with better spacing
                 zone_center_x = (start_idx + end_idx) / 2
+                data_range = sample_data['high'].max() - sample_data['low'].min()
+
                 if pattern_type == 'D-B-D':
-                    label_y = zone_high + data_range * 0.05
+                    # Position labels above D-B-D zones with more space
+                    label_y = zone_high + data_range * 0.12
                 else:
-                    label_y = zone_low - data_range * 0.05
-                
+                    # Position labels below R-B-R zones with more space  
+                    label_y = zone_low - data_range * 0.12
+
                 self.create_zone_label(ax, pattern, zone_center_x, label_y, pattern_counter, zone_range)
             
-            # Simple formatting for debug
+            # Enhanced formatting for debug
             ax.set_title(f'DEBUG: EURUSD {timeframe} Base Zones | {total_patterns} Patterns', 
                         fontsize=16, weight='bold', color=self.colors['text'])
             ax.set_xlabel('Candle Index', fontsize=12, color=self.colors['text'])
             ax.set_ylabel('Price Level', fontsize=12, color=self.colors['text'])
-            
+
+            # Set X-axis ticks every 5 candles
+            x_ticks = range(0, len(sample_data), 5)
+            ax.set_xticks(x_ticks)
+            ax.set_xticklabels([str(i) for i in x_ticks])
+
             # Grid
             ax.grid(True, alpha=0.3, linestyle='--')
             
