@@ -79,21 +79,42 @@ class EnhancedZoneVisualizer:
 
     def calculate_base_zone_boundaries(self, pattern, data):
         """
-        Calculate BASE ZONE boundaries only (not including leg-out)
-        R-B-R: Base wick-low to highest close within base
-        D-B-D: Base wick-high to lowest close within base
+        Calculate BASE ZONE boundaries with correct candle direction logic
+        R-B-R: Base wick-low to highest open/close within base (per candle direction)
+        D-B-D: Base wick-high to lowest open/close within base (per candle direction)
         """
         base = pattern['base']
         base_data = data.iloc[base['start_idx']:base['end_idx'] + 1]
         
         if pattern['type'] == 'R-B-R':
-            # R-B-R: From base wick-low to highest close within base
-            zone_low = base_data['low'].min()        # Base wick-low
-            zone_high = base_data['close'].max()     # Highest close within base
+            # R-B-R: From base wick-low to highest open/close per candle
+            zone_low = base_data['low'].min()        # Base wick-low (unchanged)
+            
+            # For each candle, take the higher of open/close
+            highest_points = []
+            for idx in base_data.index:
+                candle = base_data.loc[idx]
+                if candle['close'] >= candle['open']:  # Bullish candle
+                    highest_points.append(candle['close'])  # Take close
+                else:  # Bearish candle  
+                    highest_points.append(candle['open'])   # Take open
+            
+            zone_high = max(highest_points)  # Highest among all candle tops
+            
         else:  # D-B-D
-            # D-B-D: From base wick-high to lowest close within base
-            zone_high = base_data['high'].max()      # Base wick-high
-            zone_low = base_data['close'].min()      # Lowest close within base
+            # D-B-D: From base wick-high to lowest open/close per candle
+            zone_high = base_data['high'].max()      # Base wick-high (unchanged)
+            
+            # For each candle, take the lower of open/close
+            lowest_points = []
+            for idx in base_data.index:
+                candle = base_data.loc[idx]
+                if candle['close'] <= candle['open']:  # Bearish candle
+                    lowest_points.append(candle['close'])   # Take close
+                else:  # Bullish candle
+                    lowest_points.append(candle['open'])    # Take open
+            
+            zone_low = min(lowest_points)   # Lowest among all candle bottoms
         
         return zone_high, zone_low
 
@@ -157,7 +178,7 @@ class EnhancedZoneVisualizer:
                bbox=dict(boxstyle='round,pad=0.4', facecolor=bbox_color, 
                         alpha=0.95, edgecolor='white', linewidth=1.5))
 
-    def visualize_zones_debug(self, sample_size=150, timeframe='Daily'):
+    def visualize_zones_debug(self, sample_size=100, timeframe='Daily'):
         """DEBUG VISUALIZATION - Shows base zones only, NO FILE CREATION"""
         
         print("🎨 DEBUG BASE ZONE VISUALIZATION")

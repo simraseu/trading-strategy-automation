@@ -82,11 +82,11 @@ class ZoneDetector:
             raise
     
     def calculate_actual_zone_boundaries(self, data: pd.DataFrame, base: Dict, 
-                                       leg_out: Dict, pattern_type: str) -> Tuple[float, float]:
+                                   leg_out: Dict, pattern_type: str) -> Tuple[float, float]:
         """
         Calculate actual measurement boundaries matching manual trading approach
-        R-B-R: From base wick-low to leg-out close-high
-        D-B-D: From base wick-high to leg-out close-low
+        R-B-R: From base wick-low to highest open/close within base (per candle direction)
+        D-B-D: From base wick-high to lowest open/close within base (per candle direction)
         
         Args:
             data: Full dataset
@@ -98,16 +98,36 @@ class ZoneDetector:
             Tuple of (zone_high, zone_low)
         """
         base_data = data.iloc[base['start_idx']:base['end_idx'] + 1]
-        leg_out_data = data.iloc[leg_out['start_idx']:leg_out['end_idx'] + 1]
         
         if pattern_type == 'R-B-R':
-            # R-B-R: From base wick-low to leg-out close-high
-            zone_low = base_data['low'].min()        # Base wick-low
-            zone_high = leg_out_data['close'].max()  # Leg-out close-high
+            # R-B-R: From base wick-low to highest open/close per candle
+            zone_low = base_data['low'].min()        # Base wick-low (unchanged)
+            
+            # For each candle, take the higher of open/close
+            highest_points = []
+            for idx in base_data.index:
+                candle = base_data.loc[idx]
+                if candle['close'] >= candle['open']:  # Bullish candle
+                    highest_points.append(candle['close'])  # Take close
+                else:  # Bearish candle  
+                    highest_points.append(candle['open'])   # Take open
+            
+            zone_high = max(highest_points)  # Highest among all candle tops
+            
         else:  # D-B-D
-            # D-B-D: From base wick-high to leg-out close-low
-            zone_high = base_data['high'].max()      # Base wick-high
-            zone_low = leg_out_data['close'].min()   # Leg-out close-low
+            # D-B-D: From base wick-high to lowest open/close per candle
+            zone_high = base_data['high'].max()      # Base wick-high (unchanged)
+            
+            # For each candle, take the lower of open/close
+            lowest_points = []
+            for idx in base_data.index:
+                candle = base_data.loc[idx]
+                if candle['close'] <= candle['open']:  # Bearish candle
+                    lowest_points.append(candle['close'])   # Take close
+                else:  # Bullish candle
+                    lowest_points.append(candle['open'])    # Take open
+            
+            zone_low = min(lowest_points)   # Lowest among all candle bottoms
         
         return zone_high, zone_low
 
