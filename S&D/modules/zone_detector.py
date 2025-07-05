@@ -171,8 +171,7 @@ class ZoneDetector:
     def validate_leg_out_breakout_distance(self, data: pd.DataFrame, start_idx: int, 
                                         base: Dict, direction: str) -> Optional[Dict]:
         """
-        SIMPLIFIED: Validate leg-out breaks base boundaries with strength
-        Distance calculation happens in pattern creation
+        Validate leg-out breaks base boundaries with strength requirements
         
         Args:
             data: Full dataset
@@ -266,12 +265,12 @@ class ZoneDetector:
                 )
                 if not leg_out:
                     continue
-                
+
                 # Phase 4: Calculate actual measurement boundaries
                 zone_high, zone_low = self.calculate_actual_zone_boundaries(
                     data, base, leg_out, 'D-B-D'
                 )
-                
+
                 # Phase 5: Check for zone invalidation BEFORE finalizing
                 pattern_preview = {
                     'type': 'D-B-D',
@@ -279,7 +278,7 @@ class ZoneDetector:
                     'zone_high': zone_high,
                     'zone_low': zone_low
                 }
-                
+
                 is_valid, validation_msg = self.enhanced_zone_invalidation(
                     pattern_preview, data, base['end_idx'] + 1
                 )
@@ -299,8 +298,8 @@ class ZoneDetector:
                     'leg_in': leg_in,
                     'base': base,
                     'leg_out': leg_out,
-                    'zone_high': zone_high,      # ← ACTUAL measurement boundary
-                    'zone_low': zone_low,        # ← ACTUAL measurement boundary
+                    'zone_high': zone_high,
+                    'zone_low': zone_low,
                     'zone_range': zone_range
                 }
                 
@@ -345,7 +344,7 @@ class ZoneDetector:
                 if not base_valid:
                     self.logger.debug(f"R-B-R at {i} rejected: {base_msg}")
                     continue
-                
+
                 # Phase 3: Validate bullish leg-out with BREAKOUT distance requirement
                 leg_out_start = base['end_idx'] + 1
                 leg_out = self.validate_leg_out_breakout_distance(
@@ -353,12 +352,12 @@ class ZoneDetector:
                 )
                 if not leg_out:
                     continue
-                
+
                 # Phase 4: Calculate actual measurement boundaries
                 zone_high, zone_low = self.calculate_actual_zone_boundaries(
                     data, base, leg_out, 'R-B-R'
                 )
-                
+
                 # Phase 5: Check for zone invalidation BEFORE finalizing
                 pattern_preview = {
                     'type': 'R-B-R',
@@ -366,7 +365,7 @@ class ZoneDetector:
                     'zone_high': zone_high,
                     'zone_low': zone_low
                 }
-                
+
                 is_valid, validation_msg = self.enhanced_zone_invalidation(
                     pattern_preview, data, base['end_idx'] + 1
                 )
@@ -386,8 +385,8 @@ class ZoneDetector:
                     'leg_in': leg_in,
                     'base': base,
                     'leg_out': leg_out,
-                    'zone_high': zone_high,      # ← ACTUAL measurement boundary
-                    'zone_low': zone_low,        # ← ACTUAL measurement boundary
+                    'zone_high': zone_high,
+                    'zone_low': zone_low,
                     'zone_range': zone_range
                 }
                 
@@ -502,48 +501,67 @@ class ZoneDetector:
     
     def identify_base(self, data: pd.DataFrame, start_idx: int) -> Optional[Dict]:
         """
-        Identify base consolidation - ALL candles must be ≤50% (base classification)
+        Detect the entire natural base consolidation (all consecutive ≤50% candles)
         
         Args:
             data: Full dataset
             start_idx: Starting index for search
             
         Returns:
-            Base dictionary or None if invalid
+            Complete base dictionary or None if no valid base found
         """
         if start_idx >= len(data):
             return None
-            
+        
+        # Find ALL consecutive base candles (≤50%)
+        base_end_idx = start_idx
         max_base_length = self.config['max_base_candles']
         
-        for base_length in range(1, max_base_length + 1):
-            end_idx = start_idx + base_length - 1
+        # Extend base as long as candles are ≤50% (up to max limit)
+        while base_end_idx < len(data) and (base_end_idx - start_idx + 1) <= max_base_length:
+            candle = data.iloc[base_end_idx]
             
-            if end_idx >= len(data):
+            # Get candle classification
+            classification = self.candle_classifier.classify_single_candle(
+                candle['open'], candle['high'], candle['low'], candle['close']
+            )
+            
+            # If this candle is NOT a base candle (>50%), stop here
+            if classification != 'base':
                 break
             
-            base_data = data.iloc[start_idx:end_idx + 1]
-            
-            if self.is_valid_base(base_data):
-                base_high = base_data['high'].max()
-                base_low = base_data['low'].min()
-                base_range = base_high - base_low
-                
-                # Minimum base range requirement
-                if base_range < 10 * 0.0001:  # At least 10 pips
-                    continue
-                
-                return {
-                    'start_idx': start_idx,
-                    'end_idx': end_idx,
-                    'high': base_high,
-                    'low': base_low,
-                    'range': base_range,
-                    'candle_count': base_length,
-                    'quality_score': self.calculate_base_quality(base_data)
-                }
+            # This candle is a base candle, include it
+            base_end_idx += 1
         
-        return None
+        # We went one past the last base candle, so go back
+        base_end_idx -= 1
+        
+        # Check if we found any base candles
+        if base_end_idx < start_idx:
+            return None
+        
+        # Calculate base properties
+        base_data = data.iloc[start_idx:base_end_idx + 1]
+        base_high = base_data['high'].max()
+        base_low = base_data['low'].min()
+        base_range = base_high - base_low
+        base_length = base_end_idx - start_idx + 1
+        
+        # Minimum base range requirement
+        if base_range < 10 * 0.0001:  # At least 10 pips
+            return None
+        
+        quality_score = self.calculate_base_quality(base_data)
+        
+        return {
+            'start_idx': start_idx,
+            'end_idx': base_end_idx,
+            'high': base_high,
+            'low': base_low,
+            'range': base_range,
+            'candle_count': base_length,
+            'quality_score': quality_score
+        }
     
     def is_valid_leg_in(self, leg_data: pd.DataFrame, direction: str) -> bool:
         """
@@ -651,7 +669,7 @@ class ZoneDetector:
     
     def is_valid_leg_out_strength(self, leg_data: pd.DataFrame, direction: str) -> bool:
         """
-        Check leg-out specific >70% body-to-range requirement
+        Check leg-out strength requirement - must be decisive or explosive
         
         Args:
             leg_data: DataFrame containing leg-out candles
@@ -660,6 +678,9 @@ class ZoneDetector:
         Returns:
             Boolean indicating if strength requirement is met
         """
+        directional_candles = 0
+        strong_candles = 0
+        
         for idx in leg_data.index:
             candle = leg_data.loc[idx]
             
@@ -669,21 +690,28 @@ class ZoneDetector:
             else:
                 correct_direction = candle['close'] < candle['open']
             
-            if not correct_direction:
-                continue  # Skip counter-trend candles
-            
-            # Calculate body ratio
-            body_size = abs(candle['close'] - candle['open'])
-            candle_range = candle['high'] - candle['low']
-            
-            if candle_range > 0:
-                body_ratio = body_size / candle_range
+            if correct_direction:
+                directional_candles += 1
                 
-                # REQUIREMENT: At least one candle must be >70%
-                if body_ratio > 0.70:
-                    return True
+                # Get candle classification
+                classification = self.candle_classifier.classify_single_candle(
+                    candle['open'], candle['high'], candle['low'], candle['close']
+                )
+                
+                # Count decisive/explosive candles
+                if classification in ['decisive', 'explosive']:
+                    strong_candles += 1
         
-        return False  # No candle met the >70% requirement
+        # Requirements:
+        # - At least 60% of candles must be in correct direction
+        # - At least one candle must be decisive or explosive
+        if len(leg_data) == 0:
+            return False
+            
+        direction_ratio = directional_candles / len(leg_data)
+        has_strong_candle = strong_candles > 0
+        
+        return direction_ratio >= 0.6 and has_strong_candle
     
     def calculate_leg_range(self, leg_data: pd.DataFrame, direction: str) -> float:
         """
@@ -725,22 +753,43 @@ class ZoneDetector:
     
     def calculate_base_quality(self, base_data: pd.DataFrame) -> float:
         """
-        Calculate quality score for base consolidation
+        Calculate base quality score favoring shorter, tighter consolidations
         
         Args:
             base_data: DataFrame containing base candles
             
         Returns:
-            Quality score as float
+            Quality score as float (0.0-1.0)
         """
-        # Favor shorter bases (1-2 candles optimal)
-        candle_count_score = 1.0 / len(base_data)
+        candle_count = len(base_data)
         
+        # Favor shorter bases
+        if candle_count == 1:
+            count_score = 1.0      # Perfect score for single candle
+        elif candle_count == 2:
+            count_score = 0.9      # Excellent for 2 candles
+        elif candle_count == 3:
+            count_score = 0.7      # Good for 3 candles
+        elif candle_count == 4:
+            count_score = 0.5      # Average for 4 candles
+        elif candle_count == 5:
+            count_score = 0.3      # Poor for 5 candles
+        else:  # 6+ candles
+            count_score = 0.1      # Very poor for 6+ candles
+        
+        # Consolidation tightness (smaller range = better)
         base_range = base_data['high'].max() - base_data['low'].min()
         avg_candle_range = base_data.apply(lambda x: x['high'] - x['low'], axis=1).mean()
-        range_score = avg_candle_range / base_range if base_range > 0 else 0
         
-        return (candle_count_score + range_score) / 2
+        if base_range > 0:
+            tightness_score = min(avg_candle_range / base_range, 1.0)
+        else:
+            tightness_score = 1.0  # Perfect consolidation
+        
+        # Weight heavily toward candle count (70% vs 30%)
+        final_score = (count_score * 0.7) + (tightness_score * 0.3)
+        
+        return round(final_score, 3)
     
     def calculate_pattern_strength(self, leg_in: Dict, base: Dict, leg_out: Dict) -> float:
         """
@@ -764,9 +813,9 @@ class ZoneDetector:
         ratio_bonus = min(leg_out_ratio / 2.0, 1.0)  # Cap at 2x for bonus
         
         strength = (leg_in_strength * 0.25 + 
-                   base_quality * 0.25 + 
-                   leg_out_strength * 0.25 + 
-                   ratio_bonus * 0.25) * base_bonus
+                    base_quality * 0.25 + 
+                    leg_out_strength * 0.25 + 
+                    ratio_bonus * 0.25) * base_bonus
         
         return round(strength, 3)
     
@@ -813,60 +862,60 @@ class ZoneDetector:
             ratio = body_size / total_range if total_range > 0 else 0
             
             print(f"Candle {i:2d}: {classification:9s} | {direction:7s} | Ratio: {ratio:.3f} | "
-                  f"OHLC: {candle['open']:.5f}/{candle['high']:.5f}/{candle['low']:.5f}/{candle['close']:.5f}")
+                    f"OHLC: {candle['open']:.5f}/{candle['high']:.5f}/{candle['low']:.5f}/{candle['close']:.5f}")
     
     def get_pattern_summary(self, patterns: Dict) -> Dict:
-       """
-       Generate summary statistics for detected patterns
-       
-       Args:
-           patterns: Dictionary containing pattern lists
-           
-       Returns:
-           Summary statistics dictionary
-       """
-       dbd_count = len(patterns['dbd_patterns'])
-       rbr_count = len(patterns['rbr_patterns'])
-       total_count = patterns['total_patterns']
-       
-       if total_count == 0:
-           return {
-               'total_patterns': 0,
-               'dbd_patterns': 0,
-               'rbr_patterns': 0,
-               'avg_strength': 0.0,
-               'avg_legout_ratio': 0.0,
-               'strength_distribution': {'high': 0, 'medium': 0, 'low': 0}
-           }
-       
-       all_strengths = []
-       all_ratios = []
-       
-       for pattern in patterns['dbd_patterns'] + patterns['rbr_patterns']:
-           all_strengths.append(pattern['strength'])
-           all_ratios.append(pattern['leg_out']['ratio_to_base'])
-       
-       avg_strength = sum(all_strengths) / len(all_strengths)
-       avg_ratio = sum(all_ratios) / len(all_ratios)
-       
-       high_strength = sum(1 for s in all_strengths if s >= 0.8)
-       medium_strength = sum(1 for s in all_strengths if 0.5 <= s < 0.8)
-       low_strength = sum(1 for s in all_strengths if s < 0.5)
-       
-       return {
-           'total_patterns': total_count,
-           'dbd_patterns': dbd_count,
-           'rbr_patterns': rbr_count,
-           'avg_strength': round(avg_strength, 3),
-           'avg_legout_ratio': round(avg_ratio, 2),
-           'strength_distribution': {
-               'high': high_strength,
-               'medium': medium_strength,
-               'low': low_strength
-           }
-       }
-   
-   # Legacy methods for backwards compatibility
+        """
+        Generate summary statistics for detected patterns
+        
+        Args:
+            patterns: Dictionary containing pattern lists
+            
+        Returns:
+            Summary statistics dictionary
+        """
+        dbd_count = len(patterns['dbd_patterns'])
+        rbr_count = len(patterns['rbr_patterns'])
+        total_count = patterns['total_patterns']
+        
+        if total_count == 0:
+            return {
+                'total_patterns': 0,
+                'dbd_patterns': 0,
+                'rbr_patterns': 0,
+                'avg_strength': 0.0,
+                'avg_legout_ratio': 0.0,
+                'strength_distribution': {'high': 0, 'medium': 0, 'low': 0}
+            }
+        
+        all_strengths = []
+        all_ratios = []
+        
+        for pattern in patterns['dbd_patterns'] + patterns['rbr_patterns']:
+            all_strengths.append(pattern['strength'])
+            all_ratios.append(pattern['leg_out']['ratio_to_base'])
+        
+        avg_strength = sum(all_strengths) / len(all_strengths)
+        avg_ratio = sum(all_ratios) / len(all_ratios)
+        
+        high_strength = sum(1 for s in all_strengths if s >= 0.8)
+        medium_strength = sum(1 for s in all_strengths if 0.5 <= s < 0.8)
+        low_strength = sum(1 for s in all_strengths if s < 0.5)
+        
+        return {
+            'total_patterns': total_count,
+            'dbd_patterns': dbd_count,
+            'rbr_patterns': rbr_count,
+            'avg_strength': round(avg_strength, 3),
+            'avg_legout_ratio': round(avg_ratio, 2),
+            'strength_distribution': {
+                'high': high_strength,
+                'medium': medium_strength,
+                'low': low_strength
+            }
+        }
+    
+    # Legacy methods for backwards compatibility
     def detect_dbd_patterns(self, data: pd.DataFrame) -> List[Dict]:
         """
         Legacy method - redirects to enhanced version
