@@ -245,7 +245,7 @@ class ZoneDetector:
         base_range = base['range']
         
         # Your strategy requirement: leg-out must be 2x base size minimum
-        required_ratio = 1.0  # Change this to test different ratios
+        required_ratio = 1.5  # Change this to test different ratios
         
         if base_range > 0:
             actual_ratio = leg_range / base_range
