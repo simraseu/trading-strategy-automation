@@ -621,7 +621,7 @@ class ZoneDetector:
                 return False
             
             body_ratio = body_size / candle_range
-            return body_ratio > 0.30  # Minimum threshold
+            return body_ratio > 0.50  # Minimum threshold
         
         # For multi-candle legs
         directional_candles = 0
