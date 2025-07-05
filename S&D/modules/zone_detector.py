@@ -201,7 +201,8 @@ class ZoneDetector:
             
             # Check basic leg validity and strength requirements
             if (self.is_valid_leg_in(leg_data, direction) and 
-                self.is_valid_leg_out_strength(leg_data, direction)):
+                self.is_valid_leg_out_strength(leg_data, direction) and
+                self.is_valid_leg_out_distance(leg_data, base, direction)):
                 
                 # Check zone breakout
                 if direction == 'bullish':
@@ -226,6 +227,31 @@ class ZoneDetector:
                 }
         
         return None
+    
+    def is_valid_leg_out_distance(self, leg_data: pd.DataFrame, base: Dict, direction: str) -> bool:
+        """
+        Check if leg-out meets minimum distance requirement relative to base
+        
+        Args:
+            leg_data: DataFrame containing leg-out candles
+            base: Base pattern information
+            direction: 'bullish' or 'bearish'
+            
+        Returns:
+            Boolean indicating if distance requirement is met
+        """
+        # Calculate leg-out range
+        leg_range = leg_data['high'].max() - leg_data['low'].min()
+        base_range = base['range']
+        
+        # Your strategy requirement: leg-out must be 2x base size minimum
+        required_ratio = 1.0  # Change this to test different ratios
+        
+        if base_range > 0:
+            actual_ratio = leg_range / base_range
+            return actual_ratio >= required_ratio
+        
+        return False
 
     def detect_dbd_patterns_enhanced(self, data: pd.DataFrame) -> List[Dict]:
         """
