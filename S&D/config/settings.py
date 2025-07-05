@@ -89,6 +89,29 @@ TEST_CONFIG = {
     'debug_mode': True
 }
 
+# TREND CLASSIFICATION SETTINGS - MODULE 3 (UPDATED WITH FILTER)
+TREND_CONFIG = {
+    'ema_fast': 50,
+    'ema_medium': 100,
+    'ema_slow': 200,
+    'min_separation': 0.3,        # Minimum EMA separation (0-1 scale)
+    'separation_lookback': 5,     # Smooth separation over N periods
+    'ranging_threshold': 0.3,     # Below this = ranging market
+    'trending_threshold': 0.6,    # Above this = strong trending market
+    'trend_classifications': [
+        'strong_bullish',
+        'medium_bullish',
+        'weak_bullish',
+        'ranging',               # New classification
+        'strong_bearish',
+        'medium_bearish',
+        'weak_bearish'
+    ]
+}
+
+print("✅ Triple EMA Trend Classification configured!")
+
 print("✅ Zone Detection configuration added!")
 print("✅ Configuration loaded successfully!")
+print("✅ Trend Classification configuration added!")
 print(f"📁 Data path: {PATHS['raw_data']}")
