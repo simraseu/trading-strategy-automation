@@ -1,0 +1,9 @@
+*.ipynb linguist-detectable=false
+
+*.py linguist-detectable=true
+
+*.json linguist-vendored=true
+*.yaml linguist-vendored=true
+*.yml linguist-vendored=true
+
+*.py linguist-language=Python
