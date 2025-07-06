@@ -109,8 +109,67 @@ TREND_CONFIG = {
     ]
 }
 
-print("✅ Triple EMA Trend Classification configured!")
+# RISK MANAGEMENT CONFIGURATION - MODULE 4
+RISK_CONFIG = {
+    'account_settings': {
+        'starting_balance': 10000,      # $10,000 account
+        'currency': 'USD',
+        'broker_leverage': 30,          # EU regulation limit
+        'min_free_margin': 1000        # Keep $1,000 minimum margin
+    },
+    'risk_limits': {
+        'max_risk_per_trade': 2.0,     # 2% max per trade
+        'max_daily_risk': 6.0,         # 6% max daily exposure  
+        'max_portfolio_risk': 20.0,    # 20% total exposure limit
+        'max_correlated_risk': 4.0     # 4% max on correlated pairs
+    },
+    'position_sizing': {
+        'method': 'fixed_risk_percent', # Fixed 2% risk per trade
+        'min_lot_size': 0.01,          # Micro lots
+        'max_lot_size': 2.0,           # 2 standard lots max
+        'lot_size_increment': 0.01     # Micro lot increments
+    },
+    'stop_loss_rules': {
+        'method': 'zone_boundary_plus_buffer',
+        'buffer_pips': 5,              # 5 pip buffer beyond zone
+        'max_stop_distance': 80,       # Max 80 pip stop loss
+        'min_stop_distance': 15,       # Min 15 pip stop loss
+        'round_to_level': True         # Round to psychological levels
+    },
+    'take_profit_rules': {
+        'risk_reward_ratio': 2.0,      # Minimum 1:2 RR
+        'scale_out_enabled': True,     # Take partial profits
+        'scale_levels': [1.0, 2.0, 3.0], # 1R, 2R, 3R exits
+        'scale_percentages': [33, 33, 34] # % of position to close
+    }
+}
 
+# SIGNAL GENERATION CONFIGURATION - MODULE 5
+SIGNAL_CONFIG = {
+    'zone_timeframes': ['H4', 'H12', 'Daily', 'Weekly'],
+    'trend_timeframe': 'Daily',  # Always Daily for consistency
+    'signal_types': ['zone_entry', 'zone_retest'],
+    'quality_thresholds': {
+        'min_zone_score': 60,      # Minimum zone quality score
+        'min_trend_strength': 0.3,  # Minimum EMA separation
+        'min_signal_score': 65,    # Minimum overall signal score
+        'trend_alignment': True    # Must align with trend
+    },
+    'risk_management': {
+        'max_signals_per_day': 3,
+        'position_sizing': 'fixed_risk',
+        'stop_loss_method': 'zone_boundary'
+    },
+    'entry_methods': {
+        'market_entry_threshold': 80,   # Zone score for market entry
+        'limit_entry_threshold': 65,    # Zone score for limit entry
+        'wait_retest_threshold': 50     # Zone score for waiting
+    }
+}
+
+print("✅ Signal Generation configuration added!")
+print("✅ Risk Management configuration added!")
+print("✅ Triple EMA Trend Classification configured!")
 print("✅ Zone Detection configuration added!")
 print("✅ Configuration loaded successfully!")
 print("✅ Trend Classification configuration added!")
