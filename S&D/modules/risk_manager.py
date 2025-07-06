@@ -43,40 +43,29 @@ class RiskManager:
         print(f"🛡️  Risk Manager initialized:")
         print(f"   Account Balance: ${self.account_balance:,.2f}")
         print(f"   Max Risk Per Trade: {self.config['risk_limits']['max_risk_per_trade']}%")
-        print(f"   Max Daily Risk: {self.config['risk_limits']['max_daily_risk']}%")
+        
+        # Only print daily risk if it exists in config
+        if 'max_daily_risk' in self.config['risk_limits']:
+            print(f"   Max Daily Risk: {self.config['risk_limits']['max_daily_risk']}%")
+        else:
+            print(f"   Daily Risk: No limit (single trade focus)")
         
     def validate_zone_for_trading(self, zone: Dict, current_price: float, 
-                                 pair: str = 'EURUSD') -> Dict:
+                             pair: str = 'EURUSD') -> Dict:
         """
-        CRITICAL: Validate if zone meets all risk management criteria
-        
-        Args:
-            zone: Zone dictionary from zone detector
-            current_price: Current market price
-            pair: Currency pair
-            
-        Returns:
-            Dictionary with validation results and trading parameters
+        Validate zone using YOUR EXACT manual trading strategy
         """
         try:
-            # Get pip value for the pair
+            # Calculate YOUR entry and stop using manual methods
+            entry_price = self.calculate_entry_price_manual(zone)
+            stop_loss_price = self.calculate_stop_loss_manual(zone)
+            
+            # Calculate stop distance from your entry (not current price)
             pip_value = self.get_pip_value(pair)
+            stop_distance_pips = abs(entry_price - stop_loss_price) / pip_value
             
-            # Calculate stop loss placement
-            stop_loss_data = self.calculate_stop_loss(zone, current_price, pip_value)
-            
-            # Validate stop loss distance
-            stop_distance_valid = self.validate_stop_distance(stop_loss_data['distance_pips'])
-            
-            if not stop_distance_valid:
-                return {
-                    'is_tradeable': False,
-                    'reason': f"Stop distance {stop_loss_data['distance_pips']:.1f} pips outside limits",
-                    'stop_distance_pips': stop_loss_data['distance_pips']
-                }
-            
-            # Calculate position size
-            position_size = self.calculate_position_size(stop_loss_data['distance_pips'], pair)
+            # Calculate position size based on YOUR 5% risk
+            position_size = self.calculate_position_size(stop_distance_pips, pair)
             
             # Validate position size
             if position_size < self.config['position_sizing']['min_lot_size']:
@@ -86,33 +75,31 @@ class RiskManager:
                     'position_size': position_size
                 }
             
-            # Check risk budget availability
-            risk_amount = self.calculate_risk_amount(stop_loss_data['distance_pips'], position_size, pair)
+            # Calculate YOUR take profits
+            take_profits = self.calculate_take_profits_manual(entry_price, stop_loss_price, zone['type'])
             
+            # Calculate risk amount
+            risk_amount = self.calculate_risk_amount(stop_distance_pips, position_size, pair)
+            
+            # Check risk budget (if configured)
             if not self.check_risk_budget(risk_amount):
                 return {
                     'is_tradeable': False,
-                    'reason': "Daily risk budget exceeded",
-                    'risk_amount': risk_amount
+                    'reason': "Risk budget exceeded"
                 }
             
-            # Calculate take profits
-            take_profits = self.calculate_take_profits(
-                zone, current_price, stop_loss_data['price'], pair
-            )
-            
-            # Everything passed - create complete trading parameters
+            # Return complete trading parameters using YOUR strategy
             return {
                 'is_tradeable': True,
                 'position_size': position_size,
                 'risk_amount': risk_amount,
-                'stop_loss_price': stop_loss_data['price'],
-                'stop_distance_pips': stop_loss_data['distance_pips'],
-                'take_profit_1': take_profits['tp1'],
-                'take_profit_2': take_profits['tp2'],
-                'take_profit_3': take_profits['tp3'],
-                'risk_reward_ratio': take_profits['risk_reward_ratio'],
-                'entry_method': self.determine_entry_method(zone),
+                'entry_price': entry_price,
+                'stop_loss_price': stop_loss_price,
+                'stop_distance_pips': stop_distance_pips,
+                'take_profit_1': take_profits['tp1'],  # 1:1 break-even
+                'take_profit_2': take_profits['tp2'],  # 1:2 final target
+                'risk_reward_ratio': 2.0,
+                'entry_method': 'manual_strategy',
                 'trade_direction': 'BUY' if zone['type'] == 'R-B-R' else 'SELL'
             }
             
@@ -122,53 +109,61 @@ class RiskManager:
                 'is_tradeable': False,
                 'reason': f"Validation error: {str(e)}"
             }
+
+    def calculate_entry_price_manual(self, zone: Dict) -> float:
+        """Your 5% front-running entry method"""
+        zone_size = zone['zone_high'] - zone['zone_low']
+        front_run_distance = zone_size * 0.05
+        
+        if zone['type'] == 'R-B-R':
+            return zone['zone_high'] + front_run_distance
+        else:
+            return zone['zone_low'] - front_run_distance
+
+    def calculate_take_profits_manual(self, entry_price: float, stop_loss_price: float, zone_type: str) -> Dict:
+        """Your 1:1 and 1:2 take profit method"""
+        risk_distance = abs(entry_price - stop_loss_price)
+        
+        if zone_type == 'R-B-R':  # BUY trade
+            tp1 = entry_price + risk_distance      # 1:1 (break-even move)
+            tp2 = entry_price + (risk_distance * 2) # 1:2 (final target)
+        else:  # SELL trade
+            tp1 = entry_price - risk_distance      # 1:1 (break-even move)
+            tp2 = entry_price - (risk_distance * 2) # 1:2 (final target)
+        
+        return {
+            'tp1': tp1,
+            'tp2': tp2,
+            'risk_distance': risk_distance
+        }
     
-    def calculate_stop_loss(self, zone: Dict, current_price: float, pip_value: float) -> Dict:
+    def calculate_stop_loss_manual(self, zone: Dict) -> float:
         """
-        Calculate stop loss placement based on zone boundaries
+        Your 33% zone buffer stop loss method (simplified version)
         
         Args:
             zone: Zone dictionary
-            current_price: Current market price
-            pip_value: Pip value for the pair
             
         Returns:
-            Dictionary with stop loss price and distance
+            Stop loss price with 33% buffer
         """
-        buffer_pips = self.config['stop_loss_rules']['buffer_pips']
-        buffer_price = buffer_pips * pip_value
+        zone_size = zone['zone_high'] - zone['zone_low']
+        buffer_distance = zone_size * 0.33  # 33% of zone size
         
-        if zone['type'] == 'R-B-R':  # Demand zone - stop below
-            stop_loss_price = zone['zone_low'] - buffer_price
-            direction = 'BUY'
-        else:  # D-B-D Supply zone - stop above
-            stop_loss_price = zone['zone_high'] + buffer_price
-            direction = 'SELL'
+        if zone['type'] == 'R-B-R':  # Demand zone
+            # Stop 33% BELOW zone bottom
+            stop_loss_price = zone['zone_low'] - buffer_distance
+        else:  # D-B-D Supply zone
+            # Stop 33% ABOVE zone top
+            stop_loss_price = zone['zone_high'] + buffer_distance
         
-        # Calculate distance in pips
-        if direction == 'BUY':
-            distance_pips = (current_price - stop_loss_price) / pip_value
-        else:
-            distance_pips = (stop_loss_price - current_price) / pip_value
-        
-        return {
-            'price': stop_loss_price,
-            'distance_pips': abs(distance_pips),
-            'direction': direction
-        }
+        return stop_loss_price
     
     def calculate_position_size(self, stop_distance_pips: float, pair: str = 'EURUSD') -> float:
         """
-        Calculate position size using fixed risk percentage method
-        
-        Args:
-            stop_distance_pips: Stop loss distance in pips
-            pair: Currency pair
-            
-        Returns:
-            Position size in lots
+        Calculate position size using your 5% risk method
         """
-        # Risk amount in account currency
+        # Risk amount in account currency (5% of balance)
         risk_amount = self.account_balance * (self.config['risk_limits']['max_risk_per_trade'] / 100)
         
         # Get pip value in account currency
@@ -189,61 +184,9 @@ class RiskManager:
         
         return position_size
     
-    def calculate_take_profits(self, zone: Dict, current_price: float, 
-                             stop_loss_price: float, pair: str = 'EURUSD') -> Dict:
-        """
-        Calculate take profit levels based on risk-reward ratios
-        
-        Args:
-            zone: Zone dictionary
-            current_price: Current market price
-            stop_loss_price: Stop loss price
-            pair: Currency pair
-            
-        Returns:
-            Dictionary with take profit levels
-        """
-        # Calculate risk distance
-        risk_distance = abs(current_price - stop_loss_price)
-        
-        # Get risk-reward ratios from config
-        rr_ratios = self.config['take_profit_rules']['scale_levels']
-        
-        if zone['type'] == 'R-B-R':  # BUY trade
-            tp1 = current_price + (risk_distance * rr_ratios[0])
-            tp2 = current_price + (risk_distance * rr_ratios[1])
-            tp3 = current_price + (risk_distance * rr_ratios[2])
-        else:  # SELL trade
-            tp1 = current_price - (risk_distance * rr_ratios[0])
-            tp2 = current_price - (risk_distance * rr_ratios[1])
-            tp3 = current_price - (risk_distance * rr_ratios[2])
-        
-        return {
-            'tp1': tp1,
-            'tp2': tp2,
-            'tp3': tp3,
-            'risk_reward_ratio': rr_ratios[1],  # Main target is 2R
-            'risk_distance': risk_distance
-        }
-    
-    def validate_stop_distance(self, stop_distance_pips: float) -> bool:
-        """
-        Validate stop loss distance against limits
-        
-        Args:
-            stop_distance_pips: Stop distance in pips
-            
-        Returns:
-            Boolean indicating if distance is valid
-        """
-        min_stop = self.config['stop_loss_rules']['min_stop_distance']
-        max_stop = self.config['stop_loss_rules']['max_stop_distance']
-        
-        return min_stop <= stop_distance_pips <= max_stop
-    
     def check_risk_budget(self, risk_amount: float) -> bool:
         """
-        Check if trade fits within daily risk budget
+        Check if trade fits within daily risk budget (if configured)
         
         Args:
             risk_amount: Risk amount for the trade
@@ -251,6 +194,10 @@ class RiskManager:
         Returns:
             Boolean indicating if trade fits budget
         """
+        # If no daily risk limit configured, always return True
+        if 'max_daily_risk' not in self.config['risk_limits']:
+            return True
+        
         max_daily_risk = self.account_balance * (self.config['risk_limits']['max_daily_risk'] / 100)
         
         return (self.daily_risk_used + risk_amount) <= max_daily_risk

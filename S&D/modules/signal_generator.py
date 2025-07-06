@@ -149,7 +149,7 @@ class SignalGenerator:
         return aligned_zones
     
     def create_signal(self, zone: Dict, risk_data: Dict, trend_data: pd.DataFrame, 
-                     pair: str, zone_timeframe: str) -> Dict:
+                 pair: str, zone_timeframe: str) -> Dict:
         """
         Create complete trading signal with all parameters
         
@@ -175,14 +175,13 @@ class SignalGenerator:
             # Trade Direction & Type
             'direction': 'BUY' if zone['type'] == 'R-B-R' else 'SELL',
             'signal_type': zone['type'],
-            'entry_method': risk_data['entry_method'],
+            'entry_method': risk_data.get('entry_method', 'limit_front_run'),
             
             # Price Levels
-            'entry_price': self.calculate_entry_price(zone, risk_data),
+            'entry_price': risk_data.get('entry_price', self.calculate_entry_price(zone, risk_data)),
             'stop_loss': risk_data['stop_loss_price'],
-            'take_profit_1': risk_data['take_profit_1'],
-            'take_profit_2': risk_data['take_profit_2'],
-            'take_profit_3': risk_data['take_profit_3'],
+            'take_profit_1': risk_data['take_profit_1'],  # 1:1 break-even
+            'take_profit_2': risk_data['take_profit_2'],  # 1:2 final target
             
             # Risk Management
             'position_size': risk_data['position_size'],
@@ -213,7 +212,7 @@ class SignalGenerator:
     
     def calculate_entry_price(self, zone: Dict, risk_data: Dict) -> float:
         """
-        Calculate optimal entry price based on entry method
+        Calculate entry price using your 5% front-running method
         
         Args:
             zone: Zone dictionary
@@ -222,28 +221,15 @@ class SignalGenerator:
         Returns:
             Entry price
         """
-        entry_method = risk_data['entry_method']
+        zone_size = zone['zone_high'] - zone['zone_low']
+        front_run_distance = zone_size * 0.05  # 5% of zone size
         
-        if entry_method == 'market_entry':
-            # High quality zone - enter at current market price
-            if zone['type'] == 'R-B-R':
-                return zone['zone_high']  # Enter at top of demand zone
-            else:
-                return zone['zone_low']   # Enter at bottom of supply zone
-                
-        elif entry_method == 'limit_entry':
-            # Medium quality - enter within zone
-            if zone['type'] == 'R-B-R':
-                return zone['zone_low'] + ((zone['zone_high'] - zone['zone_low']) * 0.3)
-            else:
-                return zone['zone_high'] - ((zone['zone_high'] - zone['zone_low']) * 0.3)
-                
-        else:  # wait_retest
-            # Lower quality - wait for better entry
-            if zone['type'] == 'R-B-R':
-                return zone['zone_low'] + ((zone['zone_high'] - zone['zone_low']) * 0.1)
-            else:
-                return zone['zone_high'] - ((zone['zone_high'] - zone['zone_low']) * 0.1)
+        if zone['type'] == 'R-B-R':  # Demand zone - enter 5% above zone top
+            entry_price = zone['zone_high'] + front_run_distance
+        else:  # D-B-D Supply zone - enter 5% below zone bottom  
+            entry_price = zone['zone_low'] - front_run_distance
+        
+        return entry_price
     
     def score_and_rank_signals(self, signals: List[Dict]) -> List[Dict]:
         """
@@ -332,28 +318,21 @@ class SignalGenerator:
             return 'low'
     
     def apply_signal_filters(self, signals: List[Dict]) -> List[Dict]:
-        """
-        Apply final signal filters based on configuration
-        
-        Args:
-            signals: List of scored signals
-            
-        Returns:
-            Filtered signals
-        """
+        """Apply signal filters (handle optional max_signals_per_day)"""
         filtered = []
         
-        # Filter by minimum score
         min_score = self.config['quality_thresholds']['min_zone_score']
         
         for signal in signals:
             if signal['signal_score'] >= min_score:
                 filtered.append(signal)
         
-        # Limit number of signals per day
-        max_signals = self.config['risk_management']['max_signals_per_day']
+        # Optional daily limit
+        if 'max_signals_per_day' in self.config['risk_management']:
+            max_signals = self.config['risk_management']['max_signals_per_day']
+            return filtered[:max_signals]
         
-        return filtered[:max_signals]
+        return filtered
     
     def calculate_zone_score(self, zone: Dict) -> float:
         """Calculate zone score (consistent with risk manager)"""
@@ -442,14 +421,15 @@ class SignalGenerator:
                 'direction': signal['direction'],
                 'entry_price': signal['entry_price'],
                 'stop_loss': signal['stop_loss'],
-                'take_profit_1': signal['take_profit_1'],
-                'take_profit_2': signal['take_profit_2'],
+                'take_profit_1': signal['take_profit_1'],  # 1:1 break-even
+                'take_profit_2': signal['take_profit_2'],  # 1:2 final target
                 'position_size': signal['position_size'],
                 'risk_amount': signal['risk_amount'],
                 'signal_score': signal['signal_score'],
                 'priority': signal['priority'],
                 'trend': signal['trend'],
-                'zone_score': signal['zone_score']
+                'zone_score': signal['zone_score'],
+                'stop_distance_pips': signal['stop_distance_pips']
             })
         
         df = pd.DataFrame(signal_data)
