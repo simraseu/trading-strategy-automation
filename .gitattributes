@@ -1,9 +1,17 @@
+# Jupyter notebooks - exclude from stats
 *.ipynb linguist-detectable=false
 
-*.py linguist-detectable=true
+# Documentation - exclude from stats  
+*.md linguist-documentation=true
+*.txt linguist-documentation=true
 
+# Config files - mark as vendored
 *.json linguist-vendored=true
 *.yaml linguist-vendored=true
 *.yml linguist-vendored=true
+*.toml linguist-vendored=true
 
-*.py linguist-language=Python
+# Templates - mark as vendored if not core logic
+*.html linguist-vendored=true
+*.css linguist-vendored=true
+*.js linguist-vendored=true
