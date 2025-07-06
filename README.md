@@ -89,7 +89,7 @@ This project demonstrates:
 
 * **Module 4**: Risk Management System
 * **Module 5**: Entry Signal Generation (Current)
-* **Module 6**: ML Strategy Engine
+* **Module 6**: Backtesting Engine
 * **Module 7**: Multi-Timeframe Analysis (After validation)
 * **Module 8**: Advanced Zone Qualifiers (After validation)
 * **Module 9**: Advanced ML Optimization Engine
