@@ -150,9 +150,9 @@ SIGNAL_CONFIG = {
     'trend_timeframe': 'Daily',  # Always Daily for consistency
     'signal_types': ['zone_entry', 'zone_retest'],
     'quality_thresholds': {
-        'min_zone_score': 60,      # Minimum zone quality score
+        'min_zone_score': 50,      # Minimum zone quality score
         'min_trend_strength': 0.3,  # Minimum EMA separation
-        'min_signal_score': 65,    # Minimum overall signal score
+        'min_signal_score': 50,    # Minimum overall signal score
         'trend_alignment': True    # Must align with trend
     },
     'risk_management': {
@@ -161,9 +161,9 @@ SIGNAL_CONFIG = {
         'stop_loss_method': 'zone_boundary'
     },
     'entry_methods': {
-        'market_entry_threshold': 80,   # Zone score for market entry
-        'limit_entry_threshold': 65,    # Zone score for limit entry
-        'wait_retest_threshold': 50     # Zone score for waiting
+        'market_entry_threshold': 70,   # Zone score for market entry
+        'limit_entry_threshold': 55,    # Zone score for limit entry
+        'wait_retest_threshold': 40     # Zone score for waiting
     }
 }
 

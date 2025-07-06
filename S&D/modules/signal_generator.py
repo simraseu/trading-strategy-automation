@@ -60,6 +60,9 @@ class SignalGenerator:
             List of validated trading signals
         """
         try:
+            # STORE DATA for date access
+            self.data = data.copy()
+            
             print(f"\n🎯 Generating {pair} signals ({zone_timeframe} zones + Daily trend)")
             print("=" * 60)
             
@@ -85,10 +88,11 @@ class SignalGenerator:
             print("🛡️  Step 4: Risk validation...")
             current_price = data['close'].iloc[-1]
             tradeable_signals = []
-            
+
             for zone in aligned_zones:
+                # PASS DATA to risk validation
                 risk_validation = self.risk_manager.validate_zone_for_trading(
-                    zone, current_price, pair
+                    zone, current_price, pair, data  # ← ADD data parameter
                 )
                 
                 if risk_validation['is_tradeable']:
@@ -117,7 +121,7 @@ class SignalGenerator:
     
     def filter_zones_by_trend(self, zones: Dict, current_trend: str) -> List[Dict]:
         """
-        Filter zones that align with current trend direction
+        Filter zones that align with current trend direction WITH DEBUG
         
         Args:
             zones: Dictionary with zone patterns
@@ -134,54 +138,88 @@ class SignalGenerator:
         
         all_zones = zones['dbd_patterns'] + zones['rbr_patterns']
         
+        print(f"   DEBUG: Current trend = {current_trend}")
+        print(f"   DEBUG: Bullish trends = {bullish_trends}")
+        print(f"   DEBUG: Total zones to check = {len(all_zones)}")
+        
+        recent_zone_count = 0
+        old_zone_count = 0
+        
         for zone in all_zones:
             zone_type = zone['type']
             
+            # Calculate zone age for debugging
+            if hasattr(self, 'data') and self.data is not None:
+                zone_end_date = self.data.index[zone['end_idx']]
+                days_ago = (self.data.index[-1] - zone_end_date).days
+                is_recent = days_ago <= 365
+            else:
+                days_ago = 0
+                is_recent = True
+            
             # Trend alignment logic
+            should_keep = False
             if current_trend in bullish_trends and zone_type == 'R-B-R':
                 # Bullish trend + Demand zone = BUY signal
+                should_keep = True
                 aligned_zones.append(zone)
             elif current_trend in bearish_trends and zone_type == 'D-B-D':
                 # Bearish trend + Supply zone = SELL signal
+                should_keep = True
                 aligned_zones.append(zone)
             # Ranging market = no signals (filtered out)
+            
+            # Debug output for recent zones
+            if is_recent:
+                recent_zone_count += 1
+                status = "KEPT" if should_keep else "FILTERED"
+                print(f"   DEBUG RECENT: {zone_type} zone {days_ago} days ago - {status}")
+            elif should_keep:
+                old_zone_count += 1
+        
+        print(f"   DEBUG: Recent zones processed: {recent_zone_count}")
+        print(f"   DEBUG: Old zones kept: {old_zone_count}")
+        print(f"   DEBUG: Total zones kept: {len(aligned_zones)}")
         
         return aligned_zones
     
     def create_signal(self, zone: Dict, risk_data: Dict, trend_data: pd.DataFrame, 
                  pair: str, zone_timeframe: str) -> Dict:
         """
-        Create complete trading signal with all parameters
-        
-        Args:
-            zone: Zone dictionary
-            risk_data: Risk validation results
-            trend_data: Trend analysis data
-            pair: Currency pair
-            zone_timeframe: Timeframe used for zone detection
-            
-        Returns:
-            Complete signal dictionary
+        Create complete trading signal with all parameters INCLUDING DATES
         """
         signal_id = f"{pair}_{zone_timeframe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
         
+        # GET ZONE FORMATION DATES from the stored data
+        zone_start_date = self.data.index[zone['start_idx']]
+        zone_end_date = self.data.index[zone['end_idx']]
+        base_start_date = self.data.index[zone['base']['start_idx']]
+        base_end_date = self.data.index[zone['base']['end_idx']]
+        
         signal = {
-            # Signal Identification
+            # Signal Identification WITH DATES
             'signal_id': signal_id,
             'pair': pair,
             'timeframe': zone_timeframe,
             'timestamp': datetime.now(),
             
+            # ZONE DATES - Critical for manual validation
+            'zone_start_date': zone_start_date,
+            'zone_end_date': zone_end_date,
+            'base_start_date': base_start_date,
+            'base_end_date': base_end_date,
+            'zone_formation_period': f"{zone_start_date.strftime('%Y-%m-%d')} to {zone_end_date.strftime('%Y-%m-%d')}",
+            
             # Trade Direction & Type
             'direction': 'BUY' if zone['type'] == 'R-B-R' else 'SELL',
             'signal_type': zone['type'],
-            'entry_method': risk_data.get('entry_method', 'limit_front_run'),
+            'entry_method': risk_data.get('entry_method', 'manual_strategy'),
             
             # Price Levels
-            'entry_price': risk_data.get('entry_price', self.calculate_entry_price(zone, risk_data)),
+            'entry_price': risk_data['entry_price'],
             'stop_loss': risk_data['stop_loss_price'],
-            'take_profit_1': risk_data['take_profit_1'],  # 1:1 break-even
-            'take_profit_2': risk_data['take_profit_2'],  # 1:2 final target
+            'take_profit_1': risk_data['take_profit_1'],
+            'take_profit_2': risk_data['take_profit_2'],
             
             # Risk Management
             'position_size': risk_data['position_size'],
@@ -318,21 +356,59 @@ class SignalGenerator:
             return 'low'
     
     def apply_signal_filters(self, signals: List[Dict]) -> List[Dict]:
-        """Apply signal filters (handle optional max_signals_per_day)"""
-        filtered = []
+        """
+        Apply signal filters with RECENCY PRIORITY
         
+        Args:
+            signals: List of scored signals
+            
+        Returns:
+            Filtered signals prioritizing recent zones
+        """
+        # First filter by minimum score
         min_score = self.config['quality_thresholds']['min_zone_score']
         
+        score_filtered = []
         for signal in signals:
             if signal['signal_score'] >= min_score:
-                filtered.append(signal)
+                score_filtered.append(signal)
+        
+        print(f"   Signals after score filter (≥{min_score}): {len(score_filtered)}")
+        
+        # CRITICAL: Add recency scoring to prioritize recent zones
+        current_price = score_filtered[0]['zone_high'] if score_filtered else 1.18  # Approximate current price
+        
+        for signal in score_filtered:
+            # Calculate distance from current price (closer = more relevant)
+            zone_center = (signal['zone_high'] + signal['zone_low']) / 2
+            distance_from_current = abs(zone_center - current_price)
+            
+            # Recency bonus: zones closer to current price get priority
+            max_distance = 0.20  # 20 cents max relevant distance
+            distance_factor = max(0, (max_distance - distance_from_current) / max_distance)
+            
+            # Boost signal score for recent/relevant zones
+            signal['recency_bonus'] = distance_factor * 20  # Up to 20 point bonus
+            signal['adjusted_score'] = signal['signal_score'] + signal['recency_bonus']
+        
+        # Sort by ADJUSTED score (includes recency)
+        score_filtered.sort(key=lambda x: x['adjusted_score'], reverse=True)
         
         # Optional daily limit
         if 'max_signals_per_day' in self.config['risk_management']:
             max_signals = self.config['risk_management']['max_signals_per_day']
-            return filtered[:max_signals]
+            return score_filtered[:max_signals]
         
-        return filtered
+        # Return top 5 most recent/relevant signals
+        top_signals = score_filtered[:5]
+        
+        print(f"   Final signals after recency filter: {len(top_signals)}")
+        for i, signal in enumerate(top_signals):
+            zone_center = (signal['zone_high'] + signal['zone_low']) / 2
+            distance = abs(zone_center - current_price)
+            print(f"      Signal {i+1}: Score {signal['signal_score']:.1f} + Recency {signal['recency_bonus']:.1f} = {signal['adjusted_score']:.1f} (Distance: {distance:.5f})")
+        
+        return top_signals
     
     def calculate_zone_score(self, zone: Dict) -> float:
         """Calculate zone score (consistent with risk manager)"""
@@ -399,19 +475,10 @@ class SignalGenerator:
         }
     
     def export_signals_for_backtesting(self, filename: str = None) -> str:
-        """
-        Export signals in backtesting format
-        
-        Args:
-            filename: Optional filename for export
-            
-        Returns:
-            Filename of exported data
-        """
+        """Export signals with DATE information for manual validation"""
         if not filename:
             filename = f"signals_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
         
-        # Convert signals to DataFrame
         signal_data = []
         for signal in self.signals:
             signal_data.append({
@@ -419,17 +486,30 @@ class SignalGenerator:
                 'pair': signal['pair'],
                 'timeframe': signal['timeframe'],
                 'direction': signal['direction'],
+                
+                # CRITICAL: Date information for manual validation
+                'zone_start_date': signal['zone_start_date'],
+                'zone_end_date': signal['zone_end_date'],
+                'base_start_date': signal['base_start_date'],
+                'base_end_date': signal['base_end_date'],
+                'zone_formation_period': signal['zone_formation_period'],
+                
+                # Trading parameters
                 'entry_price': signal['entry_price'],
                 'stop_loss': signal['stop_loss'],
-                'take_profit_1': signal['take_profit_1'],  # 1:1 break-even
-                'take_profit_2': signal['take_profit_2'],  # 1:2 final target
+                'take_profit_1': signal['take_profit_1'],
+                'take_profit_2': signal['take_profit_2'],
                 'position_size': signal['position_size'],
                 'risk_amount': signal['risk_amount'],
+                'stop_distance_pips': signal['stop_distance_pips'],
+                
+                # Zone details
+                'zone_high': signal['zone_high'],
+                'zone_low': signal['zone_low'],
+                'zone_score': signal['zone_score'],
                 'signal_score': signal['signal_score'],
                 'priority': signal['priority'],
-                'trend': signal['trend'],
-                'zone_score': signal['zone_score'],
-                'stop_distance_pips': signal['stop_distance_pips']
+                'trend': signal['trend']
             })
         
         df = pd.DataFrame(signal_data)

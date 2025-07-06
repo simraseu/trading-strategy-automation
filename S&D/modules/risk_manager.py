@@ -49,13 +49,61 @@ class RiskManager:
             print(f"   Max Daily Risk: {self.config['risk_limits']['max_daily_risk']}%")
         else:
             print(f"   Daily Risk: No limit (single trade focus)")
-        
-    def validate_zone_for_trading(self, zone: Dict, current_price: float, 
-                             pair: str = 'EURUSD') -> Dict:
+    
+    def check_zone_testing(self, zone: Dict, data: pd.DataFrame) -> Tuple[bool, str]:
         """
-        Validate zone using YOUR EXACT manual trading strategy
+        Check if zone has been tested (33% penetration rule)
+        
+        Args:
+            zone: Zone dictionary  
+            data: Full OHLC data
+            
+        Returns:
+            Tuple of (is_valid, reason)
         """
         try:
+            zone_end_idx = zone['end_idx']
+            zone_high = zone['zone_high']
+            zone_low = zone['zone_low']
+            zone_size = zone_high - zone_low
+            zone_type = zone['type']
+            
+            # Check candles after zone formation
+            for i in range(zone_end_idx + 1, len(data)):
+                candle = data.iloc[i]
+                
+                if zone_type == 'R-B-R':  # Demand zone
+                    # 33% down from zone top = tested
+                    test_level = zone_high - (zone_size * 0.33)
+                    if candle['close'] < test_level:
+                        return False, f"Demand zone tested - price closed at {candle['close']:.5f} below test level {test_level:.5f}"
+                        
+                else:  # D-B-D Supply zone  
+                    # 33% up from zone bottom = tested
+                    test_level = zone_low + (zone_size * 0.33)
+                    if candle['close'] > test_level:
+                        return False, f"Supply zone tested - price closed at {candle['close']:.5f} above test level {test_level:.5f}"
+            
+            return True, "Zone untested"
+            
+        except Exception as e:
+            return False, f"Error checking zone testing: {str(e)}"
+        
+    def validate_zone_for_trading(self, zone: Dict, current_price: float, 
+                             pair: str = 'EURUSD', data: pd.DataFrame = None) -> Dict:
+        """
+        Validate zone using YOUR EXACT manual trading strategy + testing check
+        """
+        try:
+            # Check if zone has been tested (if data provided)
+            if data is not None:
+                is_untested, test_reason = self.check_zone_testing(zone, data)
+                if not is_untested:
+                    return {
+                        'is_tradeable': False,
+                        'reason': f"Zone invalidated: {test_reason}"
+                    }
+            
             # Calculate YOUR entry and stop using manual methods
             entry_price = self.calculate_entry_price_manual(zone)
             stop_loss_price = self.calculate_stop_loss_manual(zone)
@@ -111,14 +159,29 @@ class RiskManager:
             }
 
     def calculate_entry_price_manual(self, zone: Dict) -> float:
-        """Your 5% front-running entry method"""
-        zone_size = zone['zone_high'] - zone['zone_low']
-        front_run_distance = zone_size * 0.05
+        """
+        Your 5% front-running entry method using CORRECT zone logic
         
-        if zone['type'] == 'R-B-R':
-            return zone['zone_high'] + front_run_distance
-        else:
-            return zone['zone_low'] - front_run_distance
+        Args:
+            zone: Zone dictionary
+            
+        Returns:
+            Entry price with 5% front-running from proper zone boundary
+        """
+        zone_size = zone['zone_high'] - zone['zone_low']
+        front_run_distance = zone_size * 0.05  # 5% of zone size
+        
+        if zone['type'] == 'R-B-R':  # Bullish demand zone
+            # Entry 5% above the HIGHEST CLOSE/OPEN boundary
+            # Since zone detection already calculated the proper boundary, use zone_high
+            entry_price = zone['zone_high'] + front_run_distance
+            
+        else:  # D-B-D bearish supply zone
+            # Entry 5% below the LOWEST CLOSE/OPEN boundary  
+            # Since zone detection already calculated the proper boundary, use zone_low
+            entry_price = zone['zone_low'] - front_run_distance
+        
+        return entry_price
 
     def calculate_take_profits_manual(self, entry_price: float, stop_loss_price: float, zone_type: str) -> Dict:
         """Your 1:1 and 1:2 take profit method"""
@@ -139,23 +202,27 @@ class RiskManager:
     
     def calculate_stop_loss_manual(self, zone: Dict) -> float:
         """
-        Your 33% zone buffer stop loss method (simplified version)
+        Your 33% zone buffer stop loss method using CORRECT zone logic
         
         Args:
             zone: Zone dictionary
             
         Returns:
-            Stop loss price with 33% buffer
+            Stop loss price with 33% buffer from proper zone boundary
         """
-        zone_size = zone['zone_high'] - zone['zone_low']
-        buffer_distance = zone_size * 0.33  # 33% of zone size
-        
-        if zone['type'] == 'R-B-R':  # Demand zone
-            # Stop 33% BELOW zone bottom
-            stop_loss_price = zone['zone_low'] - buffer_distance
-        else:  # D-B-D Supply zone
-            # Stop 33% ABOVE zone top
-            stop_loss_price = zone['zone_high'] + buffer_distance
+        if zone['type'] == 'R-B-R':  # Bullish demand zone
+            # For bullish zones, stop goes 33% below the LOWEST WICK (zone_low)
+            zone_boundary = zone['zone_low']  # This is the lowest wick already
+            zone_size = zone['zone_high'] - zone['zone_low']
+            buffer_distance = zone_size * 0.33
+            stop_loss_price = zone_boundary - buffer_distance
+            
+        else:  # D-B-D bearish supply zone
+            # For bearish zones, stop goes 33% above the HIGHEST WICK (zone_high)  
+            zone_boundary = zone['zone_high']  # This is the highest wick already
+            zone_size = zone['zone_high'] - zone['zone_low']
+            buffer_distance = zone_size * 0.33
+            stop_loss_price = zone_boundary + buffer_distance
         
         return stop_loss_price
     
