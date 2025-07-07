@@ -90,12 +90,12 @@ class RiskManager:
             return False, f"Error checking zone testing: {str(e)}"
         
     def validate_zone_for_trading(self, zone: Dict, current_price: float, 
-                             pair: str = 'EURUSD', data: pd.DataFrame = None) -> Dict:
+                         pair: str = 'EURUSD', data: pd.DataFrame = None) -> Dict:
         """
-        Validate zone using YOUR EXACT manual trading strategy + testing check
+        FIXED: Increase distance tolerance for historical backtesting
         """
         try:
-            # Check if zone has been tested (if data provided)
+            # Check if zone has been tested (keep this validation)
             if data is not None:
                 is_untested, test_reason = self.check_zone_testing(zone, data)
                 if not is_untested:
@@ -104,7 +104,7 @@ class RiskManager:
                         'reason': f"Zone invalidated: {test_reason}"
                     }
             
-            # Calculate YOUR entry and stop using manual methods
+            # Calculate entry and stop using manual methods
             entry_price = self.calculate_entry_price_manual(zone)
             stop_loss_price = self.calculate_stop_loss_manual(zone)
             
@@ -121,6 +121,16 @@ class RiskManager:
                     'is_tradeable': False,
                     'reason': f"Position size {position_size} below minimum",
                     'position_size': position_size
+                }
+            
+            # FIXED: More realistic distance validation for historical backtesting
+            price_distance = abs(entry_price - current_price)
+            max_distance = 0.10  # INCREASED: 1000 pips (10 cents) for historical data
+            
+            if price_distance > max_distance:
+                return {
+                    'is_tradeable': False,
+                    'reason': f"Entry price {entry_price:.5f} too far from market {current_price:.5f} (distance: {price_distance:.5f})"
                 }
             
             # Calculate YOUR take profits
