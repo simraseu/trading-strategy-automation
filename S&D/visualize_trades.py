@@ -19,6 +19,68 @@ from modules.backtester import TradingBacktester
 
 plt.style.use('default')
 
+class VisiblePeriodSignalGenerator:
+    """Signal generator that uses zones from visible period only"""
+    
+    def __init__(self, visible_patterns, trend_classifier, risk_manager, extended_data, visible_data):
+        self.visible_patterns = visible_patterns
+        self.trend_classifier = trend_classifier
+        self.risk_manager = risk_manager
+        self.extended_data = extended_data
+        self.visible_data = visible_data
+    
+    def generate_signals(self, data, timeframe, pair):
+        """Generate signals using ONLY zones from visible period"""
+        current_price = self.visible_data['close'].iloc[-1]
+        
+        # Get trend from extended data (has proper EMAs)
+        trend_data = self.trend_classifier.classify_trend_with_filter()
+        current_trend = trend_data['trend_filtered'].iloc[-1]
+        
+        if current_trend == 'ranging':
+            return []
+        
+        # Filter zones by trend direction (zones are already from visible period only)
+        bullish_trends = ['strong_bullish', 'medium_bullish', 'weak_bullish']
+        
+        if current_trend in bullish_trends:
+            valid_zones = self.visible_patterns['rbr_patterns']
+        else:
+            valid_zones = self.visible_patterns['dbd_patterns']
+        
+        print(f"   Signal generation: {len(valid_zones)} zones available for {current_trend} trend")
+        
+        signals = []
+        for i, zone in enumerate(valid_zones):
+            print(f"   Testing zone {i+1}: {zone['type']} at {zone['zone_low']:.5f}-{zone['zone_high']:.5f}")
+            
+            # Validate with risk manager using extended data (for proper risk calculation)
+            risk_validation = self.risk_manager.validate_zone_for_trading(
+                zone, current_price, pair, self.extended_data
+            )
+            
+            if risk_validation['is_tradeable']:
+                signal = {
+                    'signal_id': f"{pair}_{timeframe}_{len(signals)}",
+                    'pair': pair,
+                    'direction': 'BUY' if zone['type'] == 'R-B-R' else 'SELL',
+                    'entry_price': risk_validation['entry_price'],
+                    'stop_loss': risk_validation['stop_loss_price'],
+                    'take_profit_1': risk_validation['take_profit_1'],
+                    'take_profit_2': risk_validation['take_profit_2'],
+                    'position_size': risk_validation['position_size'],
+                    'risk_amount': risk_validation['risk_amount'],
+                    'zone_high': zone['zone_high'],
+                    'zone_low': zone['zone_low'],
+                    'timeframe': timeframe
+                }
+                signals.append(signal)
+                print(f"   ✅ Zone {i+1} created signal: {signal['direction']}")
+            else:
+                print(f"   ❌ Zone {i+1} rejected: {risk_validation['reason']}")
+        
+        return signals
+
 class TradeValidationVisualizer:
     """Professional trade validation with comprehensive chart analysis"""
     
@@ -86,53 +148,80 @@ class TradeValidationVisualizer:
             traceback.print_exc()
     
     def run_validation_backtest(self, data, days_back):
-        """Run mini-backtest to get actual trade data"""
+        """FIXED: Only detect zones from the EXACT visualization period"""
         try:
-            # Initialize components
-            candle_classifier = CandleClassifier(data)
-            classified_data = candle_classifier.classify_all_candles()
-            
-            zone_detector = ZoneDetector(candle_classifier)
-            trend_classifier = TrendClassifier(data)
-            risk_manager = RiskManager(account_balance=10000)
-            signal_generator = SignalGenerator(zone_detector, trend_classifier, risk_manager)
-            
-            # Run mini-backtest
-            backtester = TradingBacktester(signal_generator, initial_balance=10000)
-            
-            # Get recent period dates
+            # Get the EXACT same period we're visualizing
             end_date = data.index[-1]
             start_date = end_date - pd.Timedelta(days=days_back)
+            
+            # STEP 1: Get ONLY the visible period data for zone detection
+            start_idx = max(0, len(data) - days_back)
+            visible_only_data = data.iloc[start_idx:].copy()
+            
+            # STEP 2: Get extended data ONLY for EMA calculation (but don't detect zones in it)
+            min_lookback_for_emas = 200
+            total_periods_needed = days_back + min_lookback_for_emas
+            extended_start_idx = max(0, len(data) - total_periods_needed)
+            extended_data = data.iloc[extended_start_idx:].copy()
+            
+            print(f"📊 FIXED: Zone detection from EXACT visualization period only:")
+            print(f"   Visible period: {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
+            print(f"   Visible data for zones: {len(visible_only_data)} candles")
+            print(f"   Extended data for EMAs: {len(extended_data)} candles")
+            
+            # STEP 3: Detect zones ONLY in visible period
+            visible_candle_classifier = CandleClassifier(visible_only_data)
+            visible_classified_data = visible_candle_classifier.classify_all_candles()
+            
+            visible_zone_detector = ZoneDetector(visible_candle_classifier)
+            visible_patterns = visible_zone_detector.detect_all_patterns(visible_classified_data)
+            
+            print(f"   Zones found in visible period: {visible_patterns['total_patterns']}")
+            print(f"   D-B-D zones: {len(visible_patterns['dbd_patterns'])}")
+            print(f"   R-B-R zones: {len(visible_patterns['rbr_patterns'])}")
+            
+            # STEP 4: Use extended data ONLY for trend classification (needs EMAs)
+            trend_classifier = TrendClassifier(extended_data)
+            risk_manager = RiskManager(account_balance=10000)
+            
+            # STEP 5: Create signal generator with visible zones + extended trend data
+            signal_generator = VisiblePeriodSignalGenerator(
+                visible_patterns, trend_classifier, risk_manager, extended_data, visible_only_data
+            )
+            
+            # STEP 6: Run backtest
+            backtester = TradingBacktester(signal_generator, initial_balance=10000)
             
             start_date_str = start_date.strftime('%Y-%m-%d')
             end_date_str = end_date.strftime('%Y-%m-%d')
             
-            # Run backtest
+            # Use the visible classified data for backtesting
             results = backtester.run_walk_forward_backtest(
-                classified_data, start_date_str, end_date_str, 365, 'EURUSD'
+                visible_classified_data, start_date_str, end_date_str, min_lookback_for_emas, 'EURUSD'
             )
             
-            return results.get('closed_trades', [])
+            trades = results.get('closed_trades', [])
+            print(f"   Trades from visible-period zones only: {len(trades)}")
+            
+            return trades
             
         except Exception as e:
-            print(f"❌ Mini-backtest failed: {e}")
+            print(f"❌ Backtest failed: {e}")
+            import traceback
+            traceback.print_exc()
             return []
     
     def create_validation_chart(self, data, trades, days_back):
-        """Create comprehensive validation chart"""
+        """Create streamlined validation chart - Price + EMAs only"""
         
-        # Create figure with subplots
-        fig = plt.figure(figsize=(20, 16))
-        gs = fig.add_gridspec(4, 1, height_ratios=[3, 1, 1, 1], hspace=0.3)
+        # Create figure with just 2 subplots - more space for price and EMAs
+        fig = plt.figure(figsize=(24, 12))  # Wider and taller
+        gs = fig.add_gridspec(2, 1, height_ratios=[4, 1], hspace=0.2)  # More space for price
         
-        # Main price chart
+        # Main price chart (larger)
         ax1 = fig.add_subplot(gs[0])
-        # EMA chart  
+        # EMA chart (smaller but visible)
         ax2 = fig.add_subplot(gs[1], sharex=ax1)
-        # Trend classification
-        ax3 = fig.add_subplot(gs[2], sharex=ax1)
-        # Volume/trade info
-        ax4 = fig.add_subplot(gs[3], sharex=ax1)
         
         # Plot main price action with trades
         self.plot_price_and_trades(ax1, data, trades)
@@ -140,14 +229,8 @@ class TradeValidationVisualizer:
         # Plot EMAs
         self.plot_emas(ax2, data)
         
-        # Plot trend classification
-        self.plot_trend_background(ax3, data)
-        
-        # Plot trade information
-        self.plot_trade_info(ax4, data, trades)
-        
-        # Format all axes
-        self.format_axes(ax1, ax2, ax3, ax4, data, days_back)
+        # Format axes
+        self.format_axes_simplified(ax1, ax2, data, days_back)
         
         # Save chart
         self.save_validation_chart(fig, days_back)
@@ -213,11 +296,18 @@ class TradeValidationVisualizer:
                        color=edge_color, linewidth=2.5)
     
     def plot_trade_zone(self, ax, trade, data, trade_num):
-        """Plot the zone that generated this trade"""
+        """Plot the zone that generated this trade - only if valid"""
         
         zone_high = trade['zone_high']
         zone_low = trade['zone_low']
         direction = trade['direction']
+        
+        # CRITICAL: Validate zone before plotting
+        zone_start_idx = self.find_zone_formation_index(trade, data)
+        
+        if zone_start_idx is None:
+            print(f"   ⚠️  Skipping invalid Trade {trade_num+1} zone - no candle overlap")
+            return
         
         # Zone color
         if direction == 'BUY':
@@ -227,23 +317,64 @@ class TradeValidationVisualizer:
             zone_color = self.colors['supply_zone']
             edge_color = '#CC0000'
         
-        # Draw zone rectangle across entire chart
-        rect = patches.Rectangle((0, zone_low), len(data), zone_high - zone_low,
-                               facecolor=zone_color, alpha=0.15,
-                               edgecolor=edge_color, linewidth=1.5,
-                               label=f'Trade {trade_num+1} Zone')
-        ax.add_patch(rect)
+        # Find zone formation date (when base ended)
+        zone_start_idx = self.find_zone_formation_index(trade, data)
         
-        # Zone boundary lines
-        ax.hlines(zone_high, 0, len(data), colors=edge_color, linewidth=2, alpha=0.7)
-        ax.hlines(zone_low, 0, len(data), colors=edge_color, linewidth=2, alpha=0.7)
-        
-        # Zone label
-        ax.text(len(data) * 0.02, (zone_high + zone_low) / 2, 
-               f'T{trade_num+1} Zone\n{zone_low:.5f}-{zone_high:.5f}',
-               bbox=dict(boxstyle="round,pad=0.3", facecolor=zone_color, alpha=0.8),
-               fontsize=8, fontweight='bold')
+        if zone_start_idx is not None:
+            # Find when trade was entered (zone becomes inactive after entry)
+            entry_date = pd.to_datetime(trade['entry_date'])
+            entry_idx = None
+            
+            for i, row in data.iterrows():
+                if pd.to_datetime(row['date']).date() == entry_date.date():
+                    entry_idx = i
+                    break
+            
+            # Zone should only show from formation to entry (not beyond)
+            zone_end_idx = entry_idx if entry_idx is not None else len(data)
+            zone_width = zone_end_idx - zone_start_idx
+            
+            if zone_width > 0:
+                rect = patches.Rectangle((zone_start_idx, zone_low), zone_width, zone_high - zone_low,
+                                    facecolor=zone_color, alpha=0.15,
+                                    edgecolor=edge_color, linewidth=1.5,
+                                    label=f'Trade {trade_num+1} Zone')
+                ax.add_patch(rect)
+                
+                # Zone boundary lines - only from formation to entry
+                ax.hlines(zone_high, zone_start_idx, zone_end_idx, colors=edge_color, linewidth=2, alpha=0.7)
+                ax.hlines(zone_low, zone_start_idx, zone_end_idx, colors=edge_color, linewidth=2, alpha=0.7)
+            
+            # Zone label positioned at formation point
+            label_x = zone_start_idx + (zone_width * 0.05)  # 5% into the zone
+            ax.text(label_x, (zone_high + zone_low) / 2, 
+                f'T{trade_num+1} Zone\n{zone_low:.5f}-{zone_high:.5f}',
+                bbox=dict(boxstyle="round,pad=0.3", facecolor=zone_color, alpha=0.8),
+                fontsize=8, fontweight='bold')
     
+    def find_zone_formation_index(self, trade, data):
+        """
+        Find zone formation index within VISIBLE period only
+        """
+        try:
+            zone_high = trade['zone_high']
+            zone_low = trade['zone_low']
+            
+            # Find FIRST candle in VISIBLE data that overlaps with zone
+            for i, row in data.iterrows():
+                candle_high = row['high']
+                candle_low = row['low']
+                
+                # Check if this candle overlaps with the zone
+                if (candle_low <= zone_high and candle_high >= zone_low):
+                    return i  # Start zone exactly where first overlap occurs
+            
+            # If no overlap in visible period, don't show zone
+            return None
+            
+        except Exception as e:
+            return None
+        
     def plot_trade_markers(self, ax, trade, data, trade_num):
         """Plot entry, stops, and targets for trade"""
         
@@ -277,20 +408,31 @@ class TradeValidationVisualizer:
                   color=color, edgecolor='white', linewidth=2, 
                   zorder=10, label=f'T{trade_num+1} Entry')
         
-        # Entry price line
-        ax.hlines(entry_price, entry_idx, len(data), 
+        # Find exit date to stop lines when trade closes
+        exit_idx = len(data)  # Default to end of chart
+        
+        if 'exit_date' in trade and trade['exit_date']:
+            exit_date = pd.to_datetime(trade['exit_date'])
+            
+            for i, row in data.iterrows():
+                if pd.to_datetime(row['date']).date() >= exit_date.date():
+                    exit_idx = i
+                    break
+        
+        # Entry price line - only from entry to exit
+        ax.hlines(entry_price, entry_idx, exit_idx, 
                  colors=color, linewidth=2, alpha=0.8, linestyle='-')
         
-        # Stop loss line
-        ax.hlines(stop_price, entry_idx, len(data), 
+        # Stop loss line - only from entry to exit
+        ax.hlines(stop_price, entry_idx, exit_idx, 
                  colors=self.colors['stop_loss'], linewidth=2, 
                  alpha=0.8, linestyle='--')
         
-        # Take profit lines
-        ax.hlines(tp1_price, entry_idx, len(data), 
+        # Take profit lines - only from entry to exit
+        ax.hlines(tp1_price, entry_idx, exit_idx, 
                  colors=self.colors['take_profit'], linewidth=1.5, 
                  alpha=0.7, linestyle=':')
-        ax.hlines(tp2_price, entry_idx, len(data), 
+        ax.hlines(tp2_price, entry_idx, exit_idx, 
                  colors=self.colors['take_profit'], linewidth=2, 
                  alpha=0.8, linestyle=':')
         
@@ -351,86 +493,54 @@ class TradeValidationVisualizer:
         ax.set_ylabel('EMAs', fontsize=10)
         ax.legend(loc='upper left', fontsize=8)
         ax.grid(True, alpha=0.3)
-    
-    def plot_trend_background(self, ax, data):
-        """Plot trend classification over time"""
         
-        # This would need trend classification data
-        # For now, show placeholder
-        ax.text(0.5, 0.5, 'Trend Classification\n(Strong Bullish/Bearish/Ranging)', 
-               transform=ax.transAxes, ha='center', va='center',
-               fontsize=12, fontweight='bold')
-        ax.set_ylabel('Trend', fontsize=10)
-    
-    def plot_trade_info(self, ax, data, trades):
-        """Plot trade information timeline"""
+    def format_axes_simplified(self, ax1, ax2, data, days_back):
+        """Format simplified chart axes"""
         
-        # Show trade entries as bars
-        trade_data = []
-        for i, trade in enumerate(trades):
-            entry_date = pd.to_datetime(trade['entry_date'])
-            
-            # Find index in data
-            for j, row in data.iterrows():
-                if pd.to_datetime(row['date']).date() == entry_date.date():
-                    trade_data.append(j)
-                    break
-        
-        if trade_data:
-            ax.bar(trade_data, [1] * len(trade_data), 
-                  color=self.colors['buy_entry'], alpha=0.7,
-                  label='Trade Entries')
-        
-        ax.set_ylabel('Trades', fontsize=10)
-        ax.set_ylim(0, 2)
-        ax.legend(loc='upper left', fontsize=8)
-    
-    def format_axes(self, ax1, ax2, ax3, ax4, data, days_back):
-        """Format all chart axes"""
-        
-        # Main chart
+        # Main price chart
         ax1.set_title(f'EURUSD Trade Validation - Last {days_back} Days', 
-                     fontsize=16, fontweight='bold')
-        ax1.set_ylabel('Price', fontsize=12)
+                    fontsize=18, fontweight='bold')
+        ax1.set_ylabel('Price', fontsize=14)
         ax1.grid(True, alpha=0.3)
-        ax1.legend(loc='upper left', fontsize=8)
+        ax1.legend(loc='upper left', fontsize=10)
         
-        # X-axis formatting for bottom chart only
-        ax4.set_xlabel('Date', fontsize=12)
+        # EMA chart
+        ax2.set_ylabel('EMAs', fontsize=12)
+        ax2.set_xlabel('Date', fontsize=14)
+        ax2.legend(loc='upper left', fontsize=10)
+        ax2.grid(True, alpha=0.3)
         
         # Set x-ticks to show dates
-        tick_positions = range(0, len(data), max(1, len(data)//10))
+        tick_positions = range(0, len(data), max(1, len(data)//12))  # More date labels
         tick_labels = [data.iloc[i]['date'].strftime('%m-%d') for i in tick_positions]
         
-        ax4.set_xticks(tick_positions)
-        ax4.set_xticklabels(tick_labels, rotation=45)
+        ax2.set_xticks(tick_positions)
+        ax2.set_xticklabels(tick_labels, rotation=45)
         
-        # Hide x-labels for upper charts
+        # Hide x-labels for upper chart
         ax1.set_xticklabels([])
-        ax2.set_xticklabels([])
-        ax3.set_xticklabels([])
     
     def save_validation_chart(self, fig, days_back):
-        """Save validation chart"""
+        """Save streamlined validation chart"""
         import os
         os.makedirs('results/validation', exist_ok=True)
         
-        filename = f"results/validation/trade_validation_{days_back}days_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+        filename = f"results/validation/trade_validation_streamlined_{days_back}days_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
         fig.savefig(filename, dpi=300, bbox_inches='tight')
-        print(f"💾 Validation chart saved: {filename}")
+        print(f"💾 Streamlined validation chart saved: {filename}")
 
 def validate_trades():
     """Main function to run trade validation"""
     visualizer = TradeValidationVisualizer()
     
     print("Trade Validation Options:")
-    print("1. Last 30 days")
-    print("2. Last 60 days") 
-    print("3. Last 90 days")
+    print("1. Last 180 days")
+    print("2. Last 365 days") 
+    print("3. Last 700 days")
     
     choice = input("Enter choice (1-3): ").strip()
     
-    days_map = {'1': 30, '2': 60, '3': 90}
+    days_map = {'1': 180, '2': 365, '3': 700}
     days_back = days_map.get(choice, 60)
     
     visualizer.validate_recent_trades(days_back)

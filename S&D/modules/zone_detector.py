@@ -82,52 +82,36 @@ class ZoneDetector:
             raise
     
     def calculate_actual_zone_boundaries(self, data: pd.DataFrame, base: Dict, 
-                                   leg_out: Dict, pattern_type: str) -> Tuple[float, float]:
+                               leg_out: Dict, pattern_type: str) -> Tuple[float, float]:
         """
-        Calculate actual measurement boundaries matching manual trading approach
-        R-B-R: From base wick-low to highest open/close within base (per candle direction)
-        D-B-D: From base wick-high to lowest open/close within base (per candle direction)
+        Calculate zone boundaries using ACTUAL base candle data with validation
+        """
+        base_start_idx = base['start_idx']
+        base_end_idx = base['end_idx']
         
-        Args:
-            data: Full dataset
-            base: Base pattern information
-            leg_out: Leg-out pattern information  
-            pattern_type: 'R-B-R' or 'D-B-D'
-            
-        Returns:
-            Tuple of (zone_high, zone_low)
-        """
-        base_data = data.iloc[base['start_idx']:base['end_idx'] + 1]
+        # Validate indices are within data range
+        if base_start_idx < 0 or base_end_idx >= len(data):
+            return None, None
+        
+        # Get actual base candle data
+        base_data = data.iloc[base_start_idx:base_end_idx + 1]
+        
+        if len(base_data) == 0:
+            return None, None
         
         if pattern_type == 'R-B-R':
-            # R-B-R: From base wick-low to highest open/close per candle
-            zone_low = base_data['low'].min()        # Base wick-low (unchanged)
-            
-            # For each candle, take the higher of open/close
-            highest_points = []
-            for idx in base_data.index:
-                candle = base_data.loc[idx]
-                if candle['close'] >= candle['open']:  # Bullish candle
-                    highest_points.append(candle['close'])  # Take close
-                else:  # Bearish candle  
-                    highest_points.append(candle['open'])   # Take open
-            
-            zone_high = max(highest_points)  # Highest among all candle tops
+            # R-B-R: Simple and reliable - use actual base boundaries
+            zone_low = base_data['low'].min()         # Lowest wick in base
+            zone_high = base_data['high'].max()       # Highest wick in base
             
         else:  # D-B-D
-            # D-B-D: From base wick-high to lowest open/close per candle
-            zone_high = base_data['high'].max()      # Base wick-high (unchanged)
-            
-            # For each candle, take the lower of open/close
-            lowest_points = []
-            for idx in base_data.index:
-                candle = base_data.loc[idx]
-                if candle['close'] <= candle['open']:  # Bearish candle
-                    lowest_points.append(candle['close'])   # Take close
-                else:  # Bullish candle
-                    lowest_points.append(candle['open'])    # Take open
-            
-            zone_low = min(lowest_points)   # Lowest among all candle bottoms
+            # D-B-D: Simple and reliable - use actual base boundaries  
+            zone_low = base_data['low'].min()         # Lowest wick in base
+            zone_high = base_data['high'].max()       # Highest wick in base
+        
+        # Validation: Ensure zone makes sense
+        if zone_high <= zone_low:
+            return None, None
         
         return zone_high, zone_low
 
@@ -292,10 +276,15 @@ class ZoneDetector:
                 if not leg_out:
                     continue
 
-                # Phase 4: Calculate actual measurement boundaries
+                # Phase 4: Calculate actual measurement boundaries with validation
                 zone_high, zone_low = self.calculate_actual_zone_boundaries(
                     data, base, leg_out, 'D-B-D'
                 )
+                
+                # CRITICAL: Skip if zone calculation failed
+                if zone_high is None or zone_low is None:
+                    print(f"   ❌ Zone calculation failed for D-B-D at index {i}")
+                    continue
 
                 # Phase 5: Check for zone invalidation BEFORE finalizing
                 pattern_preview = {
