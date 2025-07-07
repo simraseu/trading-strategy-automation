@@ -371,23 +371,27 @@ class TradeValidationVisualizer:
                        color=edge_color, linewidth=2.5)
     
     def plot_trade_zone(self, ax, trade, data, trade_num):
-        """Plot zone only if it has verifiable visible foundation"""
+        """Plot zone only until it gets invalidated (same as trade levels)"""
         
         zone_high = trade['zone_high']
         zone_low = trade['zone_low']
         direction = trade['direction']
         
-        # STRICT VALIDATION: Only plot zones with visible foundations
+        # Find zone formation index
         zone_start_idx = self.find_zone_formation_index(trade, data)
         
         if zone_start_idx is None:
             print(f"   🚫 REJECTED Trade {trade_num+1} zone - no visible foundation")
-            print(f"      Zone: {zone_low:.5f}-{zone_high:.5f}")
-            print(f"      Reason: No candles in visualization period overlap with zone")
             return
         
-        # Zone validated - proceed with plotting
-        print(f"   ✅ VALIDATED Trade {trade_num+1} zone at index {zone_start_idx}")
+        # FIXED: Zone ends when invalidated (same as trade levels)
+        zone_end_idx = self.find_zone_invalidation_index(trade, data, zone_start_idx)
+        
+        # Ensure minimum visibility
+        if zone_end_idx <= zone_start_idx:
+            zone_end_idx = min(zone_start_idx + 5, len(data) - 1)
+        
+        zone_width = zone_end_idx - zone_start_idx
         
         # Zone styling
         if direction == 'BUY':
@@ -397,38 +401,25 @@ class TradeValidationVisualizer:
             zone_color = self.colors['supply_zone']
             edge_color = '#CC0000'
         
-        # Calculate zone display duration
-        entry_date = pd.to_datetime(trade['entry_date'])
-        entry_idx = None
-        
-        for i, row in data.iterrows():
-            if pd.to_datetime(row['date']).date() == entry_date.date():
-                entry_idx = i
-                break
-        
-        # Zone shows from formation to entry (or end of chart)
-        zone_end_idx = entry_idx if entry_idx is not None else len(data)
-        zone_width = max(1, zone_end_idx - zone_start_idx)  # Minimum width of 1
-        
-        # Plot zone rectangle
+        # Plot zone rectangle (SAME duration as trade levels)
         rect = patches.Rectangle((zone_start_idx, zone_low), zone_width, zone_high - zone_low,
                                 facecolor=zone_color, alpha=0.15,
                                 edgecolor=edge_color, linewidth=1.5,
                                 label=f'Trade {trade_num+1} Zone')
         ax.add_patch(rect)
         
-        # Zone boundary lines
+        # Zone boundary lines (SAME duration as trade levels)
         ax.hlines(zone_high, zone_start_idx, zone_end_idx, colors=edge_color, linewidth=2, alpha=0.7)
         ax.hlines(zone_low, zone_start_idx, zone_end_idx, colors=edge_color, linewidth=2, alpha=0.7)
         
-        # Zone information label
-        label_x = zone_start_idx + max(1, zone_width * 0.1)  # 10% into zone or 1 candle
+        # Zone label
+        label_x = zone_start_idx + max(1, zone_width * 0.1)
         ax.text(label_x, (zone_high + zone_low) / 2, 
                 f'T{trade_num+1}\n{zone_low:.5f}-{zone_high:.5f}',
                 bbox=dict(boxstyle="round,pad=0.3", facecolor=zone_color, alpha=0.8),
                 fontsize=8, fontweight='bold', ha='left')
         
-        print(f"      Zone plotted from index {zone_start_idx} to {zone_end_idx}")
+        print(f"   ✅ Zone plotted from index {zone_start_idx} to {zone_end_idx} (invalidated)")
     
     def find_zone_formation_index(self, trade, data):
         """Find zone formation with PRICE-BASED matching (not index-based)"""
@@ -633,27 +624,60 @@ class TradeValidationVisualizer:
         return len(data) - 1
         
     def plot_emas(self, ax, data):
-        """Plot EMAs with trend context"""
+        """Plot EMA separation instead of individual EMAs - much more useful"""
         
-        # Calculate EMAs for the period
+        # Calculate EMAs
         data_copy = data.copy()
         data_copy['ema_50'] = data_copy['close'].ewm(span=50).mean()
         data_copy['ema_100'] = data_copy['close'].ewm(span=100).mean()
         data_copy['ema_200'] = data_copy['close'].ewm(span=200).mean()
         
+        # Calculate EMA separation (same logic as trend classifier)
+        fast_slow_gap = abs(data_copy['ema_50'] - data_copy['ema_200'])
+        separation_percentage = (fast_slow_gap / data_copy['close']) * 100  # As percentage
+        
         x = range(len(data_copy))
         
-        # Plot EMAs
-        ax.plot(x, data_copy['ema_50'], color=self.colors['ema_50'], 
-               linewidth=2, label='EMA 50', alpha=0.9)
-        ax.plot(x, data_copy['ema_100'], color=self.colors['ema_100'], 
-               linewidth=2, label='EMA 100', alpha=0.9)
-        ax.plot(x, data_copy['ema_200'], color=self.colors['ema_200'], 
-               linewidth=2, label='EMA 200', alpha=0.9)
+        # Plot separation as percentage
+        ax.plot(x, separation_percentage, color='#F39C12', linewidth=2, 
+            label='EMA Separation %', alpha=0.9)
+        ax.fill_between(x, separation_percentage, alpha=0.3, color='#F39C12')
         
-        ax.set_ylabel('EMAs', fontsize=10)
-        ax.legend(loc='upper left', fontsize=8)
+        # Add trend strength thresholds
+        ax.axhline(y=0.3, color='#E74C3C', linestyle='--', alpha=0.7, 
+                linewidth=2, label='Ranging Threshold (0.3%)')
+        ax.axhline(y=0.6, color='#27AE60', linestyle='--', alpha=0.7,
+                linewidth=2, label='Strong Trend (0.6%)')
+        
+        # Highlight ranging periods (when EMAs too close)
+        ranging_mask = separation_percentage < 0.3
+        ax.fill_between(x, 0, separation_percentage.max() * 1.1, where=ranging_mask, 
+                        alpha=0.2, color='#95A5A6', label='Ranging Periods')
+        
+        # Set proper limits
+        max_sep = separation_percentage.max()
+        ax.set_ylim(0, max_sep * 1.1)
+        
+        ax.set_ylabel('EMA Separation (%)', fontsize=10)
+        ax.legend(loc='upper right', fontsize=8)
         ax.grid(True, alpha=0.3)
+        
+        # Add interpretation text
+        current_sep = separation_percentage.iloc[-1]
+        if current_sep < 0.3:
+            trend_status = "RANGING (Avoid Trading)"
+            status_color = '#E74C3C'
+        elif current_sep > 0.6:
+            trend_status = "STRONG TREND"
+            status_color = '#27AE60'
+        else:
+            trend_status = "WEAK TREND"
+            status_color = '#F39C12'
+        
+        ax.text(0.02, 0.95, f"Current: {current_sep:.2f}% - {trend_status}", 
+                transform=ax.transAxes, fontsize=10, fontweight='bold',
+                bbox=dict(boxstyle="round,pad=0.3", facecolor=status_color, alpha=0.8),
+                color='white', verticalalignment='top')
         
     def format_axes_simplified(self, ax1, ax2, data, days_back):
         """Format simplified chart axes"""

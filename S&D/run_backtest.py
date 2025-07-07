@@ -1,6 +1,6 @@
 """
-Complete Backtesting Execution Script - Module 6
-Professional historical validation of automated trading strategy
+Complete Backtesting Execution Script - Module 6 (WITH AUTO EXPORT)
+Professional historical validation with automatic result export
 """
 
 import sys
@@ -20,8 +20,8 @@ from modules.signal_generator import SignalGenerator
 from modules.backtester import TradingBacktester
 
 def run_complete_backtest():
-    """Execute comprehensive historical backtest"""
-    print("🚀 COMPLETE HISTORICAL BACKTEST - MODULE 6")
+    """Execute comprehensive historical backtest with automatic export"""
+    print("🚀 COMPLETE HISTORICAL BACKTEST WITH AUTO EXPORT")
     print("=" * 60)
     
     try:
@@ -48,7 +48,7 @@ def run_complete_backtest():
         # Setup backtest parameters
         print("\n📋 Configuring backtest parameters...")
         
-        # Use substantial historical period (ensure 365 days lookback)
+        # Use substantial historical period
         end_date = data.index[-1]
         start_date = data.index[365]  # Start after 365 days for lookback
         
@@ -71,7 +71,7 @@ def run_complete_backtest():
                 'max_concurrent_trades': 3,
                 'slippage_pips': 2,
                 'commission_per_lot': 7.0,
-                'signal_generation_frequency': 'weekly'
+                'signal_generation_frequency': 'daily'
             }
         )
         
@@ -90,10 +90,10 @@ def run_complete_backtest():
         # Display results
         print_backtest_results(results)
         
-        # Export results
+        # AUTOMATIC EXPORT (NEW)
         export_backtest_results(results)
         
-        # Create visualizations
+        # Create visualizations (NEW)
         create_equity_curve(results)
         
         return results
@@ -151,37 +151,57 @@ def print_backtest_results(results):
         print(f"   ⚠️  OUTSIDE 15% TOLERANCE - REVIEW REQUIRED")
 
 def export_backtest_results(results):
-    """Export backtest results to files"""
-    print(f"\n💾 Exporting backtest results...")
+    """AUTOMATIC EXPORT: Export backtest results to files"""
+    print(f"\n💾 EXPORTING BACKTEST RESULTS...")
     
     # Create results directory
     os.makedirs('results/backtest', exist_ok=True)
     
-    # Export trade log
+    # Generate timestamp for files
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    
+    # 1. Export individual trades for manual verification
     if results['closed_trades']:
         trades_df = pd.DataFrame(results['closed_trades'])
-        trades_filename = f"results/backtest/trade_log_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        trades_filename = f"results/backtest/trades_{timestamp}.csv"
         trades_df.to_csv(trades_filename, index=False)
-        print(f"   Trade log: {trades_filename}")
+        print(f"   ✅ Individual trades: {trades_filename}")
+        print(f"      Contains: {len(trades_df)} trades with entry/exit details")
     
-    # Export equity curve
+    # 2. Export equity curve for performance analysis
     if results['equity_curve']:
         equity_df = pd.DataFrame(results['equity_curve'])
-        equity_filename = f"results/backtest/equity_curve_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+        equity_filename = f"results/backtest/equity_curve_{timestamp}.csv"
         equity_df.to_csv(equity_filename, index=False)
-        print(f"   Equity curve: {equity_filename}")
+        print(f"   ✅ Daily equity curve: {equity_filename}")
+        print(f"      Contains: {len(equity_df)} daily performance records")
     
-    # Export summary metrics
+    # 3. Export summary metrics
     summary_data = {key: value for key, value in results.items() 
                    if key not in ['equity_curve', 'closed_trades', 'trade_pnls']}
     
     summary_df = pd.DataFrame([summary_data])
-    summary_filename = f"results/backtest/summary_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
+    summary_filename = f"results/backtest/summary_{timestamp}.csv"
     summary_df.to_csv(summary_filename, index=False)
-    print(f"   Summary: {summary_filename}")
+    print(f"   ✅ Performance summary: {summary_filename}")
+    print(f"      Contains: All key metrics for comparison")
+    
+    # 4. Export trade-by-trade P&L list
+    if results['trade_pnls']:
+        pnl_df = pd.DataFrame({
+            'trade_number': range(1, len(results['trade_pnls']) + 1),
+            'pnl': results['trade_pnls']
+        })
+        pnl_filename = f"results/backtest/trade_pnls_{timestamp}.csv"
+        pnl_df.to_csv(pnl_filename, index=False)
+        print(f"   ✅ Trade P&L sequence: {pnl_filename}")
+        print(f"      Contains: {len(results['trade_pnls'])} trade results")
+    
+    print(f"\n📁 All results exported to: results/backtest/")
+    print(f"📋 Open these CSV files in Excel for manual verification")
 
 def create_equity_curve(results):
-    """Create equity curve visualization"""
+    """Create and save equity curve visualization"""
     if not results['equity_curve']:
         print("⚠️  No equity data to plot")
         return
@@ -228,9 +248,10 @@ def create_equity_curve(results):
     plt.tight_layout()
     
     # Save chart
-    chart_filename = f"results/backtest/equity_curve_{datetime.now().strftime('%Y%m%d_%H%M%S')}.png"
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    chart_filename = f"results/backtest/equity_curve_{timestamp}.png"
     plt.savefig(chart_filename, dpi=300, bbox_inches='tight')
-    print(f"   Equity chart: {chart_filename}")
+    print(f"   ✅ Equity chart saved: {chart_filename}")
     
     plt.show()
 
@@ -277,6 +298,10 @@ def quick_test_backtest():
         print(f"   Profit Factor: {results['profit_factor']}")
         print(f"   Final Balance: ${results['final_balance']:,.2f}")
         
+        # Export quick test results
+        if results['total_trades'] > 0:
+            export_backtest_results(results)
+        
         return True
         
     except Exception as e:
@@ -301,10 +326,11 @@ if __name__ == "__main__":
     
     if success:
         print("\n🎉 Backtesting completed successfully!")
-        print("📋 Next steps:")
-        print("   1. Review trade log for signal quality")
-        print("   2. Analyze equity curve for consistency")
-        print("   3. Compare results with manual strategy")
-        print("   4. Optimize if outside 15% tolerance")
+        print("📋 Check the results/backtest/ folder for:")
+        print("   • trades_YYYYMMDD_HHMMSS.csv - Individual trade details")
+        print("   • equity_curve_YYYYMMDD_HHMMSS.csv - Daily performance")
+        print("   • summary_YYYYMMDD_HHMMSS.csv - Overall metrics")
+        print("   • equity_curve_YYYYMMDD_HHMMSS.png - Performance chart")
+        print("\n📈 Open CSV files in Excel for manual verification!")
     else:
         print("\n⚠️  Backtesting requires fixes")
