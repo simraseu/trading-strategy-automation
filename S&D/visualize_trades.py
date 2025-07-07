@@ -502,101 +502,136 @@ class TradeValidationVisualizer:
             return None
         
     def plot_trade_markers(self, ax, trade, data, trade_num):
-        """Plot entry, stops, and targets for trade"""
+        """Plot trade levels synchronized with zone lifetime"""
         
-        # Find entry date in data
-        entry_date = pd.to_datetime(trade['entry_date'])
-        entry_idx = None
-        
-        for i, row in data.iterrows():
-            if pd.to_datetime(row['date']).date() == entry_date.date():
-                entry_idx = i
-                break
-        
-        if entry_idx is None:
-            return
-        
+        zone_high = trade['zone_high']
+        zone_low = trade['zone_low']
         entry_price = trade['entry_price']
         stop_price = trade['stop_loss']
         tp1_price = trade['take_profit_1']
         tp2_price = trade['take_profit_2']
         direction = trade['direction']
         
-        # Entry marker
+        # Find zone formation index (same as zone plotting)
+        zone_start_idx = self.find_zone_formation_index(trade, data)
+        
+        if zone_start_idx is None:
+            print(f"   ⚠️  Cannot plot trade levels for T{trade_num+1} - no zone foundation")
+            return
+        
+        # Calculate zone end index (when zone gets invalidated)
+        zone_end_idx = self.find_zone_invalidation_index(trade, data, zone_start_idx)
+        
+        # Ensure minimum width of 1 candle
+        if zone_end_idx <= zone_start_idx:
+            zone_end_idx = min(zone_start_idx + 5, len(data) - 1)  # Show for at least 5 candles
+        
+        print(f"   📍 Plotting T{trade_num+1} trade levels from index {zone_start_idx} to {zone_end_idx}:")
+        print(f"      Entry: {entry_price:.5f} (5% from zone)")
+        print(f"      Stop: {stop_price:.5f} (33% buffer)")
+        print(f"      TP1: {tp1_price:.5f} (1:1 RR)")
+        print(f"      TP2: {tp2_price:.5f} (1:2 RR)")
+        
+        # Entry marker styling
         if direction == 'BUY':
             marker = '^'
-            color = self.colors['buy_entry']
+            entry_color = self.colors['buy_entry']
         else:
             marker = 'v'
-            color = self.colors['sell_entry']
+            entry_color = self.colors['sell_entry']
         
-        ax.scatter(entry_idx, entry_price, marker=marker, s=200, 
-                  color=color, edgecolor='white', linewidth=2, 
-                  zorder=10, label=f'T{trade_num+1} Entry')
+        # Plot trade levels ONLY during zone lifetime (same as zone)
+        # ENTRY LEVEL - Solid line
+        ax.hlines(entry_price, zone_start_idx, zone_end_idx, 
+                colors=entry_color, linewidth=3, alpha=0.9, linestyle='-')
         
-        # Find exit date to stop lines when trade closes
-        exit_idx = len(data)  # Default to end of chart
+        # STOP LOSS LEVEL - Dashed red line
+        ax.hlines(stop_price, zone_start_idx, zone_end_idx, 
+                colors=self.colors['stop_loss'], linewidth=2, 
+                alpha=0.8, linestyle='--')
         
-        if 'exit_date' in trade and trade['exit_date']:
-            exit_date = pd.to_datetime(trade['exit_date'])
+        # TAKE PROFIT 1 - Dotted green line
+        ax.hlines(tp1_price, zone_start_idx, zone_end_idx, 
+                colors=self.colors['take_profit'], linewidth=1.5, 
+                alpha=0.7, linestyle=':')
+        
+        # TAKE PROFIT 2 - Solid green line
+        ax.hlines(tp2_price, zone_start_idx, zone_end_idx, 
+                colors=self.colors['take_profit'], linewidth=2, 
+                alpha=0.8, linestyle='-')
+        
+        # Entry marker at zone formation point
+        ax.scatter(zone_start_idx, entry_price, marker=marker, s=200, 
+                color=entry_color, edgecolor='white', linewidth=2, 
+                zorder=15, alpha=0.9)
+        
+        # Trade info box positioned at zone start
+        zone_size = zone_high - zone_low
+        zone_pips = zone_size / 0.0001
+        entry_buffer = abs(entry_price - (zone_high if direction == 'BUY' else zone_low)) / 0.0001
+        stop_buffer = abs(stop_price - (zone_low if direction == 'BUY' else zone_high)) / 0.0001
+        
+        info_text = f'T{trade_num+1}\n'
+        info_text += f'{direction}\n'
+        info_text += f'E: {entry_price:.5f}\n'
+        info_text += f'S: {stop_price:.5f}'
+        
+        # Position info box just to the right of zone start
+        info_x = zone_start_idx + max(1, (zone_end_idx - zone_start_idx) * 0.1)
+        info_y = entry_price
+        
+        ax.text(info_x, info_y, info_text,
+            bbox=dict(boxstyle="round,pad=0.3", facecolor=entry_color, alpha=0.8),
+            fontsize=8, fontweight='bold', color='white',
+            verticalalignment='center', ha='left')
+        
+        # Add level labels at the END of each line (when zone expires)
+        ax.text(zone_end_idx + 1, entry_price, f'Entry', 
+            fontsize=7, color=entry_color, fontweight='bold', 
+            verticalalignment='center', ha='left')
+        ax.text(zone_end_idx + 1, stop_price, f'Stop', 
+            fontsize=7, color=self.colors['stop_loss'], fontweight='bold',
+            verticalalignment='center', ha='left')
+        ax.text(zone_end_idx + 1, tp1_price, f'TP1', 
+            fontsize=7, color=self.colors['take_profit'], fontweight='bold',
+            verticalalignment='center', ha='left')
+        ax.text(zone_end_idx + 1, tp2_price, f'TP2', 
+            fontsize=7, color=self.colors['take_profit'], fontweight='bold',
+            verticalalignment='center', ha='left')
+
+    def find_zone_invalidation_index(self, trade, data, zone_start_idx):
+        """Find when the zone gets invalidated/tested"""
+        zone_high = trade['zone_high']
+        zone_low = trade['zone_low']
+        direction = trade['direction']
+        
+        # Calculate 33% test levels (same as risk manager logic)
+        zone_size = zone_high - zone_low
+        
+        if direction == 'BUY':  # R-B-R demand zone
+            test_level = zone_high - (zone_size * 0.33)  # 33% down from top
+        else:  # D-B-D supply zone
+            test_level = zone_low + (zone_size * 0.33)   # 33% up from bottom
+        
+        # Search for invalidation after zone formation
+        for i in range(zone_start_idx + 1, len(data)):
+            candle = data.iloc[i]
             
-            for i, row in data.iterrows():
-                if pd.to_datetime(row['date']).date() >= exit_date.date():
-                    exit_idx = i
-                    break
+            if direction == 'BUY':
+                # Demand zone invalidated when price closes below test level
+                if candle['close'] < test_level:
+                    print(f"      Zone invalidated at index {i} (close {candle['close']:.5f} < test {test_level:.5f})")
+                    return i
+            else:
+                # Supply zone invalidated when price closes above test level
+                if candle['close'] > test_level:
+                    print(f"      Zone invalidated at index {i} (close {candle['close']:.5f} > test {test_level:.5f})")
+                    return i
         
-        # Entry price line - only from entry to exit
-        ax.hlines(entry_price, entry_idx, exit_idx, 
-                 colors=color, linewidth=2, alpha=0.8, linestyle='-')
+        # Zone never invalidated in visible period
+        print(f"      Zone remains valid through end of chart")
+        return len(data) - 1
         
-        # Stop loss line - only from entry to exit
-        ax.hlines(stop_price, entry_idx, exit_idx, 
-                 colors=self.colors['stop_loss'], linewidth=2, 
-                 alpha=0.8, linestyle='--')
-        
-        # Take profit lines - only from entry to exit
-        ax.hlines(tp1_price, entry_idx, exit_idx, 
-                 colors=self.colors['take_profit'], linewidth=1.5, 
-                 alpha=0.7, linestyle=':')
-        ax.hlines(tp2_price, entry_idx, exit_idx, 
-                 colors=self.colors['take_profit'], linewidth=2, 
-                 alpha=0.8, linestyle=':')
-        
-        # Exit marker if trade is closed
-        if 'exit_date' in trade and trade['exit_date']:
-            exit_date = pd.to_datetime(trade['exit_date'])
-            exit_idx = None
-            
-            for i, row in data.iterrows():
-                if pd.to_datetime(row['date']).date() >= exit_date.date():
-                    exit_idx = i
-                    break
-            
-            if exit_idx is not None:
-                exit_price = trade['exit_price']
-                pnl = trade['pnl']
-                
-                if pnl > 0:
-                    exit_color = self.colors['take_profit']
-                    exit_marker = 'o'
-                else:
-                    exit_color = self.colors['stop_loss']
-                    exit_marker = 'x'
-                
-                ax.scatter(exit_idx, exit_price, marker=exit_marker, s=150,
-                          color=exit_color, edgecolor='white', linewidth=2,
-                          zorder=10)
-        
-        # Trade info text
-        pnl = trade.get('pnl', 0)
-        pnl_text = f"+${pnl:.0f}" if pnl > 0 else f"${pnl:.0f}"
-        position_size = trade.get('position_size', 0)
-        
-        ax.text(entry_idx + 2, entry_price, 
-               f'T{trade_num+1}: {direction}\n{position_size:.2f} lots\n{pnl_text}',
-               bbox=dict(boxstyle="round,pad=0.3", facecolor=color, alpha=0.8),
-               fontsize=8, fontweight='bold', color='white')
-    
     def plot_emas(self, ax, data):
         """Plot EMAs with trend context"""
         
