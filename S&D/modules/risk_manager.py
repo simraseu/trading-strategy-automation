@@ -123,15 +123,7 @@ class RiskManager:
                     'position_size': position_size
                 }
             
-            # FIXED: More realistic distance validation for historical backtesting
-            price_distance = abs(entry_price - current_price)
-            max_distance = 0.10  # INCREASED: 1000 pips (10 cents) for historical data
-            
-            if price_distance > max_distance:
-                return {
-                    'is_tradeable': False,
-                    'reason': f"Entry price {entry_price:.5f} too far from market {current_price:.5f} (distance: {price_distance:.5f})"
-                }
+            # max_distance filter removed - zones valid regardless of current price distance
             
             # Calculate YOUR take profits
             take_profits = self.calculate_take_profits_manual(entry_price, stop_loss_price, zone['type'])

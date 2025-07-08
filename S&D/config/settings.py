@@ -30,8 +30,7 @@ DATA_SETTINGS = {
 }
 
 # FILE PATHS - ADAPTED FOR YOUR STRUCTURE
-BASE_DIR = r'C:\Users\sim\Desktop\Quant\OTC Strat\trading-strategy-automation\S&D'
-
+BASE_DIR = r'C:\Users\sim\Desktop\Quant\OTC\trading-strategy-automation\S&D'
 PATHS = {
     'raw_data': os.path.join(BASE_DIR, 'Data', 'raw'),
     'processed_data': os.path.join(BASE_DIR, 'Data', 'processed'),
