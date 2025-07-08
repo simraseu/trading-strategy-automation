@@ -247,40 +247,75 @@ class ManualTradeValidator:
            return {'signal_generated': False, 'total_signals': 0}
    
    def find_best_zone_match(self, patterns, manual_zone):
-       """Find best matching zone"""
-       zones = patterns['rbr_patterns'] if manual_zone['type'] == 'R-B-R' else patterns['dbd_patterns']
-       
-       best_match = None
-       best_score = 0
-       
-       for zone in zones:
-           manual_center = (manual_zone['high'] + manual_zone['low']) / 2
-           zone_center = (zone['zone_high'] + zone['zone_low']) / 2
-           center_distance = abs(manual_center - zone_center)
-           
-           # 300 pips tolerance for broker differences
-           if center_distance <= 0.0300:
-               overlap_start = max(manual_zone['low'], zone['zone_low'])
-               overlap_end = min(manual_zone['high'], zone['zone_high'])
-               
-               if overlap_end > overlap_start:
-                   overlap_size = overlap_end - overlap_start
-                   manual_size = manual_zone['high'] - manual_zone['low']
-                   zone_size = zone['zone_high'] - zone['zone_low']
-                   overlap_ratio = overlap_size / max(manual_size, zone_size)
-                   
-                   if overlap_ratio > 0.001 and overlap_ratio > best_score:
-                       best_score = overlap_ratio
-                       best_match = zone
-               else:
-                   # Accept if centers are very close even without overlap
-                   if center_distance <= 0.0100:
-                       proximity_score = 1 - (center_distance / 0.0100)
-                       if proximity_score > best_score:
-                           best_score = proximity_score
-                           best_match = zone
-       
-       return best_match
+    """Find best matching zone with improved tolerance"""
+    zones = patterns['rbr_patterns'] if manual_zone['type'] == 'R-B-R' else patterns['dbd_patterns']
+    
+    best_match = None
+    best_score = 0
+    
+    manual_center = (manual_zone['high'] + manual_zone['low']) / 2
+    manual_size = manual_zone['high'] - manual_zone['low']
+    
+    print(f"      Looking for zone near {manual_center:.4f} (size: {manual_size:.4f})")
+    
+    for i, zone in enumerate(zones):
+        zone_center = (zone['zone_high'] + zone['zone_low']) / 2
+        zone_size = zone['zone_high'] - zone['zone_low']
+        center_distance = abs(manual_center - zone_center)
+        
+        print(f"      Zone {i+1}: center {zone_center:.4f}, distance {center_distance:.4f} ({center_distance*10000:.0f} pips)")
+        
+        # MUCH MORE FLEXIBLE matching - use THREE criteria
+        
+        # Criteria 1: Close centers (500 pips tolerance)
+        center_match = center_distance <= 0.0500
+        
+        # Criteria 2: Any overlap between zones
+        overlap_start = max(manual_zone['low'], zone['zone_low'])
+        overlap_end = min(manual_zone['high'], zone['zone_high'])
+        has_overlap = overlap_end > overlap_start
+        
+        # Criteria 3: Similar zone sizes (within 2x)
+        size_ratio = min(manual_size, zone_size) / max(manual_size, zone_size)
+        size_similar = size_ratio >= 0.3  # Allow 3x size difference
+        
+        print(f"         Center match: {center_match}, Overlap: {has_overlap}, Size similar: {size_similar}")
+        
+        # STRICTER: Require better quality matches
+        criteria_met = sum([center_match, has_overlap, size_similar])
+        
+        # For good matches, require ALL THREE criteria OR center match + overlap
+        if (criteria_met >= 3) or (center_match and has_overlap and center_distance <= 0.0200):
+
+            # Calculate composite score
+            center_score = max(0, 1 - (center_distance / 0.0500))
+            
+            if has_overlap:
+                overlap_size = overlap_end - overlap_start
+                overlap_score = overlap_size / max(manual_size, zone_size)
+            else:
+                overlap_score = 0
+            
+            size_score = size_ratio
+            
+            # Weighted composite score
+            composite_score = (center_score * 0.5) + (overlap_score * 0.3) + (size_score * 0.2)
+            
+            print(f"         ✅ POTENTIAL MATCH! Score: {composite_score:.3f}")
+            
+            # Only accept if score is good enough
+            if composite_score > best_score and composite_score >= 0.5:
+                best_score = composite_score
+                best_match = zone
+        else:
+            print(f"         ❌ Only {criteria_met}/3 criteria met")
+    
+    if best_match:
+        print(f"      🎯 Best match: Score {best_score:.3f}")
+    else:
+        print(f"      ❌ No matches found")
+    
+    return best_match
    
    def find_matching_signal(self, signals, manual_trade, detected_zone):
        """Find matching signal"""
