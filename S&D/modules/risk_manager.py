@@ -95,15 +95,6 @@ class RiskManager:
         FIXED: Increase distance tolerance for historical backtesting
         """
         try:
-            # Check if zone has been tested (keep this validation)
-            if data is not None:
-                is_untested, test_reason = self.check_zone_testing(zone, data)
-                if not is_untested:
-                    return {
-                        'is_tradeable': False,
-                        'reason': f"Zone invalidated: {test_reason}"
-                    }
-            
             # Calculate entry and stop using manual methods
             entry_price = self.calculate_entry_price_manual(zone)
             stop_loss_price = self.calculate_stop_loss_manual(zone)
