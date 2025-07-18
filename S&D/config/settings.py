@@ -65,7 +65,7 @@ VALIDATION = {
     'sample_size_for_manual_check': 50
 }
 
-# ZONE DETECTION SETTINGS - MODULE 2 
+# ZONE DETECTION SETTINGS - MODULE 2 (UPDATED WITH REVERSAL PATTERNS)
 ZONE_CONFIG = {
     'min_base_candles': 1,
     'max_base_candles': 6,
@@ -75,8 +75,11 @@ ZONE_CONFIG = {
     'max_base_retracement': 0.3,
     'min_pattern_pips': 10,
     'pip_value': 0.0001,
-    'pattern_types': ['D-B-D', 'R-B-R'],
-    'focus_patterns': ['D-B-D', 'R-B-R']  # Momentum patterns priority
+    'momentum_patterns': ['D-B-D', 'R-B-R'],     # Trend continuation
+    'reversal_patterns': ['D-B-R', 'R-B-D'],     # Trend reversal
+    'pattern_types': ['D-B-D', 'R-B-R', 'D-B-R', 'R-B-D'],  # All patterns
+    'focus_patterns': ['D-B-D', 'R-B-R'],        # Priority: momentum first
+    'reversal_trend_threshold': 'weak'           # Only weak trends for reversals
 }
 
 # TESTING SETTINGS - MODULE 2 

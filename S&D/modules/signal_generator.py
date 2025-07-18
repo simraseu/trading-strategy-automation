@@ -121,10 +121,10 @@ class SignalGenerator:
     
     def filter_zones_by_trend(self, zones: Dict, current_trend: str) -> List[Dict]:
         """
-        Filter zones that align with current trend direction WITH DEBUG
+        Enhanced filter for momentum and reversal patterns based on trend alignment
         
         Args:
-            zones: Dictionary with zone patterns
+            zones: Dictionary with zone patterns (momentum + reversal)
             current_trend: Current trend classification
             
         Returns:
@@ -136,17 +136,29 @@ class SignalGenerator:
         bullish_trends = ['strong_bullish', 'medium_bullish', 'weak_bullish']
         bearish_trends = ['strong_bearish', 'medium_bearish', 'weak_bearish']
         
-        all_zones = zones['dbd_patterns'] + zones['rbr_patterns']
+        # Get all zones (momentum + reversal patterns)
+        momentum_zones = zones.get('dbd_patterns', []) + zones.get('rbr_patterns', [])
+        reversal_zones = []
+        
+        # Handle new structure if available
+        if 'reversal_patterns' in zones:
+            reversal_zones = (zones['reversal_patterns'].get('dbr_patterns', []) + 
+                            zones['reversal_patterns'].get('rbd_patterns', []))
+        
+        all_zones = momentum_zones + reversal_zones
         
         print(f"   DEBUG: Current trend = {current_trend}")
-        print(f"   DEBUG: Bullish trends = {bullish_trends}")
+        print(f"   DEBUG: Momentum zones = {len(momentum_zones)}")
+        print(f"   DEBUG: Reversal zones = {len(reversal_zones)}")
         print(f"   DEBUG: Total zones to check = {len(all_zones)}")
         
         recent_zone_count = 0
-        old_zone_count = 0
+        momentum_kept = 0
+        reversal_kept = 0
         
         for zone in all_zones:
             zone_type = zone['type']
+            zone_category = zone.get('category', 'momentum')  # Default to momentum for legacy
             
             # Calculate zone age for debugging
             if hasattr(self, 'data') and self.data is not None:
@@ -157,28 +169,43 @@ class SignalGenerator:
                 days_ago = 0
                 is_recent = True
             
-            # Trend alignment logic
+            # Enhanced trend alignment logic
             should_keep = False
-            if current_trend in bullish_trends and zone_type == 'R-B-R':
-                # Bullish trend + Demand zone = BUY signal
-                should_keep = True
-                aligned_zones.append(zone)
-            elif current_trend in bearish_trends and zone_type == 'D-B-D':
-                # Bearish trend + Supply zone = SELL signal
-                should_keep = True
-                aligned_zones.append(zone)
-            # Ranging market = no signals (filtered out)
             
-            # Debug output for recent zones
-            if is_recent:
-                recent_zone_count += 1
-                status = "KEPT" if should_keep else "FILTERED"
-                print(f"   DEBUG RECENT: {zone_type} zone {days_ago} days ago - {status}")
-            elif should_keep:
-                old_zone_count += 1
+            if current_trend in bullish_trends:
+                # MOMENTUM: Bullish trend + R-B-R demand zone
+                if zone_type == 'R-B-R':
+                    should_keep = True
+                    momentum_kept += 1
+                
+                # REVERSAL: Strong bearish reversal in weak bullish trend
+                elif zone_type == 'R-B-D' and current_trend == 'weak_bullish':
+                    should_keep = True
+                    reversal_kept += 1
+                    
+            elif current_trend in bearish_trends:
+                # MOMENTUM: Bearish trend + D-B-D supply zone
+                if zone_type == 'D-B-D':
+                    should_keep = True
+                    momentum_kept += 1
+                
+                # REVERSAL: Strong bullish reversal in weak bearish trend
+                elif zone_type == 'D-B-R' and current_trend == 'weak_bearish':
+                    should_keep = True
+                    reversal_kept += 1
+            
+            # Add to aligned zones if should keep
+            if should_keep:
+                aligned_zones.append(zone)
+                
+                # Debug output for recent zones
+                if is_recent:
+                    recent_zone_count += 1
+                    print(f"   DEBUG KEPT: {zone_type} ({zone_category}) zone {days_ago} days ago")
         
         print(f"   DEBUG: Recent zones processed: {recent_zone_count}")
-        print(f"   DEBUG: Old zones kept: {old_zone_count}")
+        print(f"   DEBUG: Momentum zones kept: {momentum_kept}")
+        print(f"   DEBUG: Reversal zones kept: {reversal_kept}")
         print(f"   DEBUG: Total zones kept: {len(aligned_zones)}")
         
         return aligned_zones
