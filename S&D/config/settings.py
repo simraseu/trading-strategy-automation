@@ -65,49 +65,36 @@ VALIDATION = {
     'sample_size_for_manual_check': 50
 }
 
-# ZONE DETECTION SETTINGS - MODULE 2 (UPDATED WITH REVERSAL PATTERNS)
+# ZONE DETECTION PARAMETERS - FIXED
+ZONE_PARAMETERS = {
+    'max_base_candles': 6,        # Maximum base candles (1-6 range)
+    'ideal_base_candles': 3,      # Sweet spot (1-3 highest probability)
+    'min_leg_out_ratio': 2.0,     # Leg-out must be 2.0x base size 
+    'min_leg_strength': 2         # Minimum decisive/explosive candles in leg
+}
+
+# ZONE DETECTION SETTINGS - FIXED
 ZONE_CONFIG = {
     'min_base_candles': 1,
     'max_base_candles': 6,
     'optimal_base_candles': 3,
-    'min_legout_ratio': 1.5,
+    'min_legout_ratio': 2.0,      # 2.0x minimum ratio requirement
     'min_leg_strength': 0.5,
     'max_base_retracement': 0.3,
     'min_pattern_pips': 10,
     'pip_value': 0.0001,
-    'momentum_patterns': ['D-B-D', 'R-B-R'],     # Trend continuation
-    'reversal_patterns': ['D-B-R', 'R-B-D'],     # Trend reversal
-    'pattern_types': ['D-B-D', 'R-B-R', 'D-B-R', 'R-B-D'],  # All patterns
-    'focus_patterns': ['D-B-D', 'R-B-R'],        # Priority: momentum first
-    'reversal_trend_threshold': 'weak'           # Only weak trends for reversals
+    'momentum_patterns': ['D-B-D', 'R-B-R'],
+    'focus_patterns': ['D-B-D', 'R-B-R']
 }
 
-# TESTING SETTINGS - MODULE 2 
-TEST_CONFIG = {
-    'test_data_size': 100,
-    'accuracy_threshold': 0.95,
-    'sample_size': 50,
-    'validation_pairs': ['EURUSD', 'GBPUSD', 'CADJPY'],
-    'debug_mode': True
-}
-
-# TREND CLASSIFICATION SETTINGS - MODULE 3 (UPDATED WITH FILTER)
+# TREND CLASSIFICATION SETTINGS - SIMPLIFIED
 TREND_CONFIG = {
-    'ema_fast': 50,
-    'ema_medium': 100,
-    'ema_slow': 200,
-    'min_separation': 0.3,        # Minimum EMA separation (0-1 scale)
-    'separation_lookback': 5,     # Smooth separation over N periods
-    'ranging_threshold': 0.3,     # Below this = ranging market
-    'trending_threshold': 0.6,    # Above this = strong trending market
+    'ema_fast': 50,               # Only EMA50
+    'ema_slow': 200,              # Only EMA200
+    # REMOVED: ema_medium (100), min_separation, ranging filters
     'trend_classifications': [
-        'strong_bullish',
-        'medium_bullish',
-        'weak_bullish',
-        'ranging',               # New classification
-        'strong_bearish',
-        'medium_bearish',
-        'weak_bearish'
+        'bullish',                # EMA50 > EMA200
+        'bearish'                 # EMA50 < EMA200
     ]
 }
 
