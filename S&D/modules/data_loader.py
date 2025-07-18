@@ -17,60 +17,73 @@ class DataLoader:
         
     def load_pair_data(self, pair: str, timeframe: str = 'Daily') -> pd.DataFrame:
         """
-        Load OHLC data for a currency pair from MetaTrader format
-        
-        Args:
-            pair: Currency pair (e.g., 'EURUSD')
-            timeframe: 'Daily', 'Weekly', 'H12', 'H8' or 'H4'
-            
-        Returns:
-            DataFrame with standardized OHLC data
+        Load OHLC data for a currency pair from multiple formats
         """
         print(f"📊 Loading {pair} {timeframe} data...")
         
-        # Find the file using pattern matching
-        timeframe_lower = timeframe.lower()
-        if timeframe_lower == 'daily':
-            pattern = f"{pair}.raw_Daily_*.csv"
-        elif timeframe_lower == 'weekly':
-            pattern = f"{pair}.raw_Weekly_*.csv"
-        elif timeframe_lower == 'h12':
-            pattern = f"{pair}.raw_H12_*.csv"
-        elif timeframe_lower == 'h8':
-            pattern = f"{pair}.raw_H8_*.csv"
-        elif timeframe_lower == 'h4':
-            pattern = f"{pair}.raw_H4_*.csv"
-        else:
-            raise ValueError(f"Unsupported timeframe: {timeframe}. Supported: Daily, Weekly, H12, H8, H4")
+        # Map timeframes to file patterns
+        timeframe_mapping = {
+            'daily': ['Daily', '1D'],
+            '2daily': ['2Daily', '2D'], 
+            '3daily': ['3Daily', '3D'],
+            '4daily': ['4Daily', '4D'],
+            'weekly': ['Weekly', '1W'],
+            'h12': ['H12', '12H'],
+            'h4': ['H4', '4H']
+        }
         
-        # Search for files matching the pattern
-        search_pattern = os.path.join(self.raw_path, pattern)
-        matching_files = glob.glob(search_pattern)
+        timeframe_lower = timeframe.lower()
+        possible_tf_names = timeframe_mapping.get(timeframe_lower, [timeframe])
+        
+        # Try multiple file patterns
+        patterns_to_try = []
+        
+        for tf_name in possible_tf_names:
+            # Standard MetaTrader format
+            patterns_to_try.append(f"{pair}.raw_{tf_name}_*.csv")
+            
+            # OANDA format with underscores
+            patterns_to_try.append(f"OANDA_{pair}_{tf_name}_*")
+            patterns_to_try.append(f"OANDA_{pair}_{tf_name}_*.csv")
+            
+            # OANDA format with COMMA AND SPACE (your actual format)
+            patterns_to_try.append(f"OANDA_{pair}, {tf_name}_*")
+            patterns_to_try.append(f"OANDA_{pair}, {tf_name}_*.csv")
+            
+            # Simple formats
+            patterns_to_try.append(f"{pair}_{tf_name}.csv")
+            patterns_to_try.append(f"{pair}_{tf_name}_*.csv")
+        
+        matching_files = []
+        for pattern in patterns_to_try:
+            search_pattern = os.path.join(self.raw_path, pattern)
+            files = glob.glob(search_pattern)
+            if files:
+                matching_files.extend(files)
+                print(f"📁 Found files with pattern '{pattern}': {[os.path.basename(f) for f in files]}")
+                break
         
         if not matching_files:
-            raise FileNotFoundError(f"No files found matching pattern: {search_pattern}")
+            # Show available files for debugging
+            available_files = [f for f in os.listdir(self.raw_path) if f.endswith('.csv') or not '.' in f]
+            raise FileNotFoundError(
+                f"No files found for {pair} {timeframe}.\n"
+                f"Searched patterns: {patterns_to_try}\n"
+                f"Available files: {available_files}"
+            )
         
-        # Use the first matching file (assuming one file per pair/timeframe)
+        # Use the first matching file
         filepath = matching_files[0]
-        print(f"📁 Found file: {os.path.basename(filepath)}")
+        print(f"📁 Using file: {os.path.basename(filepath)}")
         
         # Load the CSV
         try:
-            # Your CSV appears to have data in a single column with tab separation
-            # Let's try different parsing approaches
+            # Try reading as CSV first
+            data = pd.read_csv(filepath)
             
-            # First, try reading as tab-separated
-            data = pd.read_csv(filepath, sep='\t', header=0)
-            
-            # If that doesn't work, try parsing the single column
-            if len(data.columns) == 1:
-                # Split the single column by tabs
-                column_name = data.columns[0]
-                data = data[column_name].str.split('\t', expand=True)
-                
-                # Set proper column names
-                expected_cols = ['<DATE>', '<OPEN>', '<HIGH>', '<LOW>', '<CLOSE>', '<TICKVOL>', '<VOL>', '<SPREAD>']
-                data.columns = expected_cols[:len(data.columns)]
+            # If no headers or wrong format, try tab-separated
+            if len(data.columns) == 1 or '<DATE>' in str(data.columns):
+                data = pd.read_csv(filepath, sep='\t')
             
             # Clean and standardize the data
             data = self._clean_data(data)
@@ -80,8 +93,7 @@ class DataLoader:
             
         except Exception as e:
             print(f"❌ Error loading {filepath}: {e}")
-            # Try alternative parsing method
-            return self._parse_alternative_format(filepath)
+            raise
     
     def _clean_data(self, data: pd.DataFrame) -> pd.DataFrame:
         """

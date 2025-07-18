@@ -36,26 +36,65 @@ class FixedMomentumVsReversalBacktester:
         self.zones = None
         self.candle_classifier = None
         
-    def load_data(self, days_back: int = 730):
+    def load_data(self, days_back: int = 730, timeframe: str = 'Daily', pair: str = 'EURUSD'):
         """Load and prepare data for backtesting"""
-        print(f"📊 Loading EURUSD Daily data ({days_back} days back)...")
+        print(f"📊 Loading {pair} {timeframe} data ({days_back} days back)...")
         
         data_loader = DataLoader()
-        self.data = data_loader.load_pair_data('EURUSD', 'Daily')
+        self.data = data_loader.load_pair_data(pair, timeframe)
         
-        # Calculate date range
-        end_date = self.data.index[-1]
-        start_date = end_date - timedelta(days=days_back)
+        # Debug: Check what type the index is
+        print(f"🔍 Data index type: {type(self.data.index)}")
+        print(f"🔍 Index sample: {self.data.index[:3]}")
         
-        # Ensure we have enough lookback data (365 days minimum)
-        if len(self.data) < days_back + 365:
-            print(f"⚠️  Limited data: Using {len(self.data)} candles available")
+        # Ensure the index is datetime
+        if not isinstance(self.data.index, pd.DatetimeIndex):
+            print("⚠️  Converting index to datetime...")
+            # If index is integers, assume it's a date column that needs to be converted
+            if 'date' in self.data.columns:
+                self.data.set_index('date', inplace=True)
+                self.data.index = pd.to_datetime(self.data.index)
+            elif '<DATE>' in self.data.columns:
+                self.data.set_index('<DATE>', inplace=True)
+                self.data.index = pd.to_datetime(self.data.index)
+            else:
+                # Try to convert the existing index
+                try:
+                    self.data.index = pd.to_datetime(self.data.index)
+                except:
+                    print("❌ Could not convert index to datetime. Using all data.")
+                    self.test_data = self.data
+                    return self.test_data
+        
+        # Now safely calculate date range
+        try:
+            if days_back >= 9999:  # "All available data"
+                print("📊 Using all available data")
+                self.test_data = self.data
+            else:
+                end_date = self.data.index[-1]  # Should now be datetime
+                start_date = end_date - timedelta(days=days_back)
+                
+                print(f"🔍 End date: {end_date} (type: {type(end_date)})")
+                print(f"🔍 Start date: {start_date} (type: {type(start_date)})")
+                
+                # Ensure we have enough lookback data (365 days minimum)
+                if len(self.data) < days_back + 365:
+                    print(f"⚠️  Limited data: Using {len(self.data)} candles available")
+                    self.test_data = self.data
+                else:
+                    # Filter data by date range
+                    self.test_data = self.data[self.data.index >= start_date]
+        
+        except Exception as e:
+            print(f"⚠️  Date filtering failed ({e}), using all data")
             self.test_data = self.data
-        else:
-            self.test_data = self.data[self.data.index >= start_date]
         
         print(f"✅ Loaded {len(self.test_data)} candles for testing")
-        print(f"📅 Test period: {self.test_data.index[0].strftime('%Y-%m-%d')} to {self.test_data.index[-1].strftime('%Y-%m-%d')}")
+        if hasattr(self.test_data.index[0], 'strftime'):
+            print(f"📅 Test period: {self.test_data.index[0].strftime('%Y-%m-%d')} to {self.test_data.index[-1].strftime('%Y-%m-%d')}")
+        else:
+            print(f"📅 Test period: {self.test_data.index[0]} to {self.test_data.index[-1]}")
         
         return self.test_data
     
@@ -82,9 +121,10 @@ class FixedMomentumVsReversalBacktester:
         return momentum_patterns, reversal_patterns
     
     def backtest_strategy(self, patterns: List[Dict], strategy_name: str, 
-                         distance_threshold: float) -> Dict:
+                     distance_threshold: float) -> Dict:
         """
         Backtest a specific strategy with distance threshold
+        FIXED: Proper one-trade-per-zone logic
         """
         print(f"🧪 Testing {strategy_name} with {distance_threshold}x distance...")
         
@@ -103,46 +143,89 @@ class FixedMomentumVsReversalBacktester:
         
         # Initialize tracking
         trades = []
-        active_zones = []
+        used_zones = set()  # Track zones that have been used
+        active_zones = []   # Zones waiting for entry
         account_balance = 10000
+        
+        # Pre-process zones to get activation dates
+        zone_activation_schedule = []
+        for pattern in valid_patterns:
+            zone_end_idx = pattern.get('end_idx', pattern.get('base', {}).get('end_idx'))
+            if zone_end_idx is not None and zone_end_idx < len(self.data):
+                activation_date = self.data.index[zone_end_idx]
+                zone_activation_schedule.append({
+                    'date': activation_date,
+                    'pattern': pattern,
+                    'zone_id': f"{pattern['type']}_{zone_end_idx}_{pattern['zone_low']:.5f}"
+                })
+        
+        # Sort by activation date
+        zone_activation_schedule.sort(key=lambda x: x['date'])
         
         # Process each candle for backtesting
         for i, (date, candle) in enumerate(self.test_data.iterrows()):
             current_price = candle['close']
             
             # Check for new zone activations
-            for pattern in valid_patterns:
-                if pattern['end_idx'] < len(self.data):
-                    zone_end_date = self.data.index[pattern['end_idx']]
-                    
-                    # Zone becomes active after formation
-                    if date >= zone_end_date and pattern not in active_zones:
-                        active_zones.append(pattern)
+            for schedule_item in zone_activation_schedule:
+                zone_id = schedule_item['zone_id']
+                pattern = schedule_item['pattern']
+                
+                # Zone becomes active 1 day after formation
+                if (date > schedule_item['date'] and 
+                    zone_id not in used_zones and 
+                    pattern not in active_zones):
+                    active_zones.append(pattern)
             
-            # Check for trade executions
+            # Check for trade executions (process each zone only once)
             for zone in active_zones.copy():
+                zone_id = f"{zone['type']}_{zone.get('end_idx', 0)}_{zone['zone_low']:.5f}"
+                
+                # Skip if this zone has already been used
+                if zone_id in used_zones:
+                    active_zones.remove(zone)
+                    continue
+                
                 trade_result = self.check_trade_execution(zone, candle, date, current_price)
                 
                 if trade_result:
+                    # Mark this zone as used regardless of outcome
+                    used_zones.add(zone_id)
+                    active_zones.remove(zone)
+                    
                     if 'invalidated' not in trade_result:
                         trades.append(trade_result)
                         account_balance += trade_result['pnl']
-                    
-                    active_zones.remove(zone)  # Zone used or invalidated
+                        print(f"      💰 Trade #{len(trades)}: {trade_result['result']} "
+                            f"${trade_result['pnl']:.0f} ({trade_result['zone_type']})")
+        
+        print(f"   ✅ Completed: {len(trades)} trades from {len(valid_patterns)} zones")
         
         # Calculate performance metrics
         return self.calculate_performance(trades, account_balance, strategy_name, distance_threshold)
     
     def check_trade_execution(self, zone: Dict, candle: pd.Series, 
-                            date: pd.Timestamp, current_price: float) -> Dict:
+                        date: pd.Timestamp, current_price: float) -> Dict:
         """
         Check if a trade should be executed based on zone logic
+        FIXED: More conservative entry and invalidation logic
         """
         zone_high = zone['zone_high']
         zone_low = zone['zone_low']
         zone_range = zone_high - zone_low
         
-        # 5% front-run entry logic
+        # More conservative invalidation (50% penetration instead of 33%)
+        invalidation_threshold = zone_range * 0.50
+        
+        # Check for zone invalidation FIRST (before entries)
+        if zone['type'] in ['R-B-R', 'D-B-R']:  # Demand zones
+            if candle['low'] <= zone_low - invalidation_threshold:
+                return {'invalidated': True, 'zone_type': zone['type']}
+        else:  # Supply zones  
+            if candle['high'] >= zone_high + invalidation_threshold:
+                return {'invalidated': True, 'zone_type': zone['type']}
+        
+        # 5% front-run entry logic (only if not invalidated)
         if zone['type'] in ['R-B-R', 'D-B-R']:  # Demand zones (buy)
             entry_price = zone_low + (zone_range * 0.05)  # 5% into zone
             
@@ -157,42 +240,32 @@ class FixedMomentumVsReversalBacktester:
             if candle['high'] >= entry_price:
                 return self.execute_sell_trade(zone, entry_price, date, candle)
         
-        # Check for zone invalidation (33% penetration)
-        invalidation_threshold = zone_range * 0.33
-        
-        if zone['type'] in ['R-B-R', 'D-B-R']:  # Demand zones
-            if candle['low'] <= zone_low - invalidation_threshold:
-                return {'invalidated': True, 'zone_type': zone['type']}
-        else:  # Supply zones
-            if candle['high'] >= zone_high + invalidation_threshold:
-                return {'invalidated': True, 'zone_type': zone['type']}
-        
         return None
     
     def execute_buy_trade(self, zone: Dict, entry_price: float, 
-                         entry_date: pd.Timestamp, entry_candle: pd.Series) -> Dict:
+                     entry_date: pd.Timestamp, entry_candle: pd.Series) -> Dict:
         """Execute a buy trade with proper risk management"""
         zone_range = zone['zone_high'] - zone['zone_low']
         
         # Calculate stop loss (33% buffer beyond zone)
         stop_loss = zone['zone_low'] - (zone_range * 0.33)
         
-        # Calculate position size (5% risk)
-        risk_amount = 10000 * 0.05  # 5% of account
+        # Fixed $500 risk per trade
+        risk_amount = 500
         stop_distance = entry_price - stop_loss
         
         if stop_distance <= 0:
             return None
         
+        # Position size to risk exactly $500
         position_size = risk_amount / stop_distance
         
         # Calculate targets
-        target_1 = entry_price + stop_distance  # 1:1 RR
-        target_2 = entry_price + (stop_distance * 2)  # 1:2 RR
+        target_1 = entry_price + stop_distance  # 1:1 RR (break-even move)
+        target_2 = entry_price + (stop_distance * 2)  # 1:2 RR (final target)
         
-        # REALISTIC: Track actual trade outcome based on market data
+        # REALISTIC: Track actual trade outcome with proper management
         trade_outcome = self.simulate_realistic_trade_outcome(zone, entry_price, stop_loss, target_2, entry_date)
-        pnl = trade_outcome['pnl']
         
         return {
             'strategy': 'momentum' if zone['type'] in ['R-B-R', 'D-B-D'] else 'reversal',
@@ -201,51 +274,56 @@ class FixedMomentumVsReversalBacktester:
             'entry_price': entry_price,
             'exit_price': trade_outcome['exit_price'],
             'stop_loss': stop_loss,
+            'breakeven_target': target_1,
+            'final_target': target_2,
             'position_size': position_size,
             'pnl': trade_outcome['pnl'],
             'distance_ratio': zone['leg_out']['ratio_to_base'],
-            'duration_days': 5,  # Simplified
-            'result': 'win' if trade_outcome['pnl'] > 0 else 'loss',
+            'duration_days': trade_outcome.get('days_held', 0),
+            'result': 'win' if trade_outcome['pnl'] > 0 else ('breakeven' if trade_outcome['pnl'] == 0 else 'loss'),
             'exit_reason': trade_outcome['exit_reason']
         }
-    
+
     def execute_sell_trade(self, zone: Dict, entry_price: float, 
-                          entry_date: pd.Timestamp, entry_candle: pd.Series) -> Dict:
+                        entry_date: pd.Timestamp, entry_candle: pd.Series) -> Dict:
         """Execute a sell trade with proper risk management"""
         zone_range = zone['zone_high'] - zone['zone_low']
         
         # Calculate stop loss (33% buffer beyond zone)
         stop_loss = zone['zone_high'] + (zone_range * 0.33)
         
-        # Calculate position size (5% risk)
-        risk_amount = 10000 * 0.05  # 5% of account
+        # Fixed $500 risk per trade
+        risk_amount = 500
         stop_distance = stop_loss - entry_price
         
         if stop_distance <= 0:
             return None
         
+        # Position size to risk exactly $500
         position_size = risk_amount / stop_distance
         
         # Calculate targets
-        target_1 = entry_price - stop_distance  # 1:1 RR
-        target_2 = entry_price - (stop_distance * 2)  # 1:2 RR
+        target_1 = entry_price - stop_distance  # 1:1 RR (break-even move)
+        target_2 = entry_price - (stop_distance * 2)  # 1:2 RR (final target)
         
-        # Simulate trade execution
-        simulated_exit = target_2  # Assume successful momentum trade
-        pnl = (entry_price - simulated_exit) * position_size
+        # REALISTIC: Track actual trade outcome with proper management
+        trade_outcome = self.simulate_realistic_trade_outcome(zone, entry_price, stop_loss, target_2, entry_date)
         
         return {
             'strategy': 'momentum' if zone['type'] in ['R-B-R', 'D-B-D'] else 'reversal',
             'zone_type': zone['type'],
             'entry_date': entry_date,
             'entry_price': entry_price,
-            'exit_price': simulated_exit,
+            'exit_price': trade_outcome['exit_price'],
             'stop_loss': stop_loss,
+            'breakeven_target': target_1,
+            'final_target': target_2,
             'position_size': position_size,
-            'pnl': pnl,
+            'pnl': trade_outcome['pnl'],
             'distance_ratio': zone['leg_out']['ratio_to_base'],
-            'duration_days': 5,  # Simplified
-            'result': 'win' if pnl > 0 else 'loss'
+            'duration_days': trade_outcome.get('days_held', 0),
+            'result': 'win' if trade_outcome['pnl'] > 0 else ('breakeven' if trade_outcome['pnl'] == 0 else 'loss'),
+            'exit_reason': trade_outcome['exit_reason']
         }
     
     def calculate_performance(self, trades: List[Dict], final_balance: float, 
@@ -291,64 +369,137 @@ class FixedMomentumVsReversalBacktester:
         }
     
     def simulate_realistic_trade_outcome(self, zone: Dict, entry_price: float, 
-                                       stop_loss: float, target_price: float, 
-                                       entry_date: pd.Timestamp) -> Dict:
+                               stop_loss: float, target_price: float, 
+                               entry_date: pd.Timestamp) -> Dict:
         """
-        REALISTIC: Simulate trade outcome based on actual market data
+        REALISTIC: Simulate trade outcome with proper trade management
+        - Hold trades indefinitely until stop or target hit
+        - Move stop to break-even at 1:1 risk/reward
+        - Final target at 1:2 risk/reward
         """
+        # Calculate proper position size based on 5% risk ($500)
+        risk_amount = 500  # Fixed $500 risk per trade
+        stop_distance = abs(entry_price - stop_loss)
+        
+        if stop_distance <= 0:
+            return {'pnl': 0, 'exit_price': entry_price, 'exit_reason': 'invalid'}
+        
+        # Position size to risk exactly $500
+        position_size = risk_amount / stop_distance
+        
+        # Calculate 1:1 target (break-even move level)
+        if entry_price > stop_loss:  # Buy trade
+            breakeven_target = entry_price + stop_distance  # 1:1 up
+            final_target = entry_price + (stop_distance * 2)  # 1:2 up
+        else:  # Sell trade
+            breakeven_target = entry_price - stop_distance  # 1:1 down
+            final_target = entry_price - (stop_distance * 2)  # 1:2 down
+        
         # Find entry date index
         try:
             entry_idx = self.data.index.get_loc(entry_date)
         except KeyError:
-            # If exact date not found, find closest
-            entry_idx = self.data.index.get_loc(entry_date, method='nearest')
+            entry_idx = self.data.index.get_indexer([entry_date], method='nearest')[0]
         
-        # Look forward from entry date to see what actually happened
-        for i in range(entry_idx + 1, min(entry_idx + 30, len(self.data))):  # Max 30 days
+        # Trade management state
+        current_stop = stop_loss
+        at_breakeven = False
+        
+        # Look forward indefinitely until stop or target hit
+        for i in range(entry_idx + 1, len(self.data)):
             candle = self.data.iloc[i]
             
-            # Check if stop loss was hit first
-            if entry_price > stop_loss:  # Buy trade
-                if candle['low'] <= stop_loss:
+            # For buy trades
+            if entry_price > stop_loss:
+                
+                # Phase 1: Check if original stop hit before 1:1
+                if not at_breakeven and candle['low'] <= current_stop:
                     return {
-                        'pnl': -abs(entry_price - stop_loss) * 0.1,  # Loss
-                        'exit_price': stop_loss,
-                        'exit_reason': 'stop_loss'
+                        'pnl': -risk_amount,  # Lose exactly $500
+                        'exit_price': current_stop,
+                        'exit_reason': 'original_stop',
+                        'days_held': i - entry_idx
                     }
-                # Check if target was hit
-                elif candle['high'] >= target_price:
+                
+                # Phase 2: Check if 1:1 target hit (move to break-even)
+                if not at_breakeven and candle['high'] >= breakeven_target:
+                    current_stop = entry_price  # Move stop to break-even
+                    at_breakeven = True
+                    # Continue trading to 1:2 target
+                    continue
+                
+                # Phase 3: After break-even move, check break-even stop
+                if at_breakeven and candle['low'] <= current_stop:
                     return {
-                        'pnl': abs(target_price - entry_price) * 0.1,  # Win
-                        'exit_price': target_price,
-                        'exit_reason': 'target'
+                        'pnl': 0,  # Break-even exit
+                        'exit_price': current_stop,
+                        'exit_reason': 'breakeven_stop',
+                        'days_held': i - entry_idx
                     }
-            else:  # Sell trade
-                if candle['high'] >= stop_loss:
+                
+                # Phase 4: Check if final 1:2 target hit
+                if candle['high'] >= final_target:
+                    profit = (final_target - entry_price) * position_size
                     return {
-                        'pnl': -abs(entry_price - stop_loss) * 0.1,  # Loss
-                        'exit_price': stop_loss,
-                        'exit_reason': 'stop_loss'
+                        'pnl': profit,  # Full profit at 1:2
+                        'exit_price': final_target,
+                        'exit_reason': 'final_target',
+                        'days_held': i - entry_idx
                     }
-                elif candle['low'] <= target_price:
+            
+            # For sell trades
+            else:
+                
+                # Phase 1: Check if original stop hit before 1:1
+                if not at_breakeven and candle['high'] >= current_stop:
                     return {
-                        'pnl': abs(entry_price - target_price) * 0.1,  # Win
-                        'exit_price': target_price,
-                        'exit_reason': 'target'
+                        'pnl': -risk_amount,  # Lose exactly $500
+                        'exit_price': current_stop,
+                        'exit_reason': 'original_stop',
+                        'days_held': i - entry_idx
+                    }
+                
+                # Phase 2: Check if 1:1 target hit (move to break-even)
+                if not at_breakeven and candle['low'] <= breakeven_target:
+                    current_stop = entry_price  # Move stop to break-even
+                    at_breakeven = True
+                    # Continue trading to 1:2 target
+                    continue
+                
+                # Phase 3: After break-even move, check break-even stop
+                if at_breakeven and candle['high'] >= current_stop:
+                    return {
+                        'pnl': 0,  # Break-even exit
+                        'exit_price': current_stop,
+                        'exit_reason': 'breakeven_stop',
+                        'days_held': i - entry_idx
+                    }
+                
+                # Phase 4: Check if final 1:2 target hit
+                if candle['low'] <= final_target:
+                    profit = (entry_price - final_target) * position_size
+                    return {
+                        'pnl': profit,  # Full profit at 1:2
+                        'exit_price': final_target,
+                        'exit_reason': 'final_target',
+                        'days_held': i - entry_idx
                     }
         
-        # If neither hit in 30 days, close at current price (neutral outcome)
-        final_candle = self.data.iloc[min(entry_idx + 30, len(self.data) - 1)]
+        # If we reach end of data and trade is still open
+        final_candle = self.data.iloc[-1]
         final_price = final_candle['close']
         
+        # Calculate PnL based on current price
         if entry_price > stop_loss:  # Buy trade
-            pnl = (final_price - entry_price) * 0.1
+            current_pnl = (final_price - entry_price) * position_size
         else:  # Sell trade
-            pnl = (entry_price - final_price) * 0.1
+            current_pnl = (entry_price - final_price) * position_size
         
         return {
-            'pnl': pnl,
+            'pnl': current_pnl,
             'exit_price': final_price,
-            'exit_reason': 'timeout'
+            'exit_reason': 'end_of_data',
+            'days_held': len(self.data) - entry_idx - 1
         }
 
     def empty_results(self) -> Dict:
@@ -372,42 +523,132 @@ class FixedMomentumVsReversalBacktester:
             'trades': []
         }
     
-    def run_comprehensive_analysis(self, days_back: int = 730) -> Dict:
+    def run_comprehensive_analysis(self, days_back: int = 730, timeframe: str = '1D', pair: str = 'AUDNZD') -> Dict:
         """Run comprehensive momentum vs reversal analysis"""
-        print("🚀 FIXED: MOMENTUM VS REVERSAL COMPREHENSIVE ANALYSIS")
+        print("🚀 ENHANCED: MOMENTUM VS REVERSAL COMPREHENSIVE ANALYSIS")
+        print(f"💱 Pair: {pair}")
+        print(f"⏰ Timeframe: {timeframe}")
         print("=" * 70)
         
-        # Load data
-        self.load_data(days_back)
+        # Load data with specified parameters
+        self.load_data(days_back, timeframe, pair)
         
         # Detect zones
         momentum_patterns, reversal_patterns = self.detect_zones()
         
-        # Test all distance thresholds
+        # Test all distance thresholds WITH CUMULATIVE LOGIC
         all_results = []
         
         for distance in self.distance_thresholds:
             print(f"\n📊 Testing {distance}x distance threshold...")
             
-            # Test momentum strategy
-            momentum_results = self.backtest_strategy(momentum_patterns, 'Momentum', distance)
+            # FIXED: Test momentum strategy with cumulative zones
+            momentum_results = self.backtest_strategy_cumulative(momentum_patterns, 'Momentum', distance)
             all_results.append(momentum_results)
             
-            # Test reversal strategy  
-            reversal_results = self.backtest_strategy(reversal_patterns, 'Reversal', distance)
+            # FIXED: Test reversal strategy with cumulative zones  
+            reversal_results = self.backtest_strategy_cumulative(reversal_patterns, 'Reversal', distance)
             all_results.append(reversal_results)
             
             # Quick summary
             print(f"   Momentum: {momentum_results['total_trades']} trades, "
-                  f"{momentum_results['win_rate']}% WR, PF: {momentum_results['profit_factor']}")
+                f"{momentum_results['win_rate']}% WR, PF: {momentum_results['profit_factor']}")
             print(f"   Reversal: {reversal_results['total_trades']} trades, "
-                  f"{reversal_results['win_rate']}% WR, PF: {reversal_results['profit_factor']}")
+                f"{reversal_results['win_rate']}% WR, PF: {reversal_results['profit_factor']}")
         
         # Generate comprehensive report
         self.generate_analysis_report(all_results)
         self.create_performance_visualizations(all_results)
         
         return all_results
+
+    def backtest_strategy_cumulative(self, patterns: List[Dict], strategy_name: str, 
+                                distance_threshold: float) -> Dict:
+        """
+        Backtest strategy with CUMULATIVE distance logic
+        All zones meeting higher thresholds are included in lower threshold tests
+        """
+        print(f"🧪 Testing {strategy_name} with {distance_threshold}x+ distance...")
+        
+        # FIXED: Filter patterns by distance threshold (>= not just ==)
+        valid_patterns = []
+        for pattern in patterns:
+            if 'leg_out' in pattern and 'ratio_to_base' in pattern['leg_out']:
+                # CRITICAL FIX: Use >= instead of == 
+                if pattern['leg_out']['ratio_to_base'] >= distance_threshold:
+                    valid_patterns.append(pattern)
+        
+        if not valid_patterns:
+            print(f"   ⚠️  No patterns meet {distance_threshold}x+ distance requirement")
+            return self.empty_results()
+        
+        print(f"   📊 {len(valid_patterns)} patterns meet {distance_threshold}x+ requirement")
+        
+        # Initialize tracking
+        trades = []
+        used_zones = set()  # Track zones that have been used
+        active_zones = []   # Zones waiting for entry
+        account_balance = 10000
+        
+        # Pre-process zones to get activation dates
+        zone_activation_schedule = []
+        for pattern in valid_patterns:
+            zone_end_idx = pattern.get('end_idx', pattern.get('base', {}).get('end_idx'))
+            if zone_end_idx is not None and zone_end_idx < len(self.data):
+                activation_date = self.data.index[zone_end_idx]
+                zone_activation_schedule.append({
+                    'date': activation_date,
+                    'pattern': pattern,
+                    'zone_id': f"{pattern['type']}_{zone_end_idx}_{pattern['zone_low']:.5f}"
+                })
+        
+        # Sort by activation date
+        zone_activation_schedule.sort(key=lambda x: x['date'])
+        
+        # Process each candle for backtesting
+        for i, (date, candle) in enumerate(self.test_data.iterrows()):
+            current_price = candle['close']
+            
+            # Check for new zone activations
+            for schedule_item in zone_activation_schedule:
+                zone_id = schedule_item['zone_id']
+                pattern = schedule_item['pattern']
+                
+                # Zone becomes active 1 day after formation
+                if (date > schedule_item['date'] and 
+                    zone_id not in used_zones and 
+                    pattern not in active_zones):
+                    active_zones.append(pattern)
+            
+            # Check for trade executions (process each zone only once)
+            for zone in active_zones.copy():
+                zone_id = f"{zone['type']}_{zone.get('end_idx', 0)}_{zone['zone_low']:.5f}"
+                
+                # Skip if this zone has already been used
+                if zone_id in used_zones:
+                    active_zones.remove(zone)
+                    continue
+                
+                trade_result = self.check_trade_execution(zone, candle, date, current_price)
+                
+                if trade_result:
+                    # Mark this zone as used regardless of outcome
+                    used_zones.add(zone_id)
+                    active_zones.remove(zone)
+                    
+                    if 'invalidated' not in trade_result:
+                        trades.append(trade_result)
+                        account_balance += trade_result['pnl']
+                        # Show the actual distance ratio for debugging
+                        actual_distance = zone['leg_out']['ratio_to_base']
+                        print(f"      💰 Trade #{len(trades)}: {trade_result['result']} "
+                            f"${trade_result['pnl']:.0f} ({trade_result['zone_type']}) "
+                            f"Distance: {actual_distance:.1f}x")
+        
+        print(f"   ✅ Completed: {len(trades)} trades from {len(valid_patterns)} zones")
+        
+        # Calculate performance metrics
+        return self.calculate_performance(trades, account_balance, strategy_name, distance_threshold)
     
     def generate_analysis_report(self, results: List[Dict]):
         """Generate detailed analysis report"""
@@ -546,19 +787,68 @@ class FixedMomentumVsReversalBacktester:
         plt.show()
 
 def main():
-    """Main function with user input for days back"""
-    print("🚀 FIXED: MOMENTUM VS REVERSAL BACKTESTING SYSTEM")
+    """Main function with user input for pair, timeframe, and period"""
+    print("🚀 ENHANCED: MOMENTUM VS REVERSAL BACKTESTING SYSTEM")
     print("=" * 60)
     
+    # Get currency pair selection
+    print("\n💱 Select currency pair:")
+    print("   1. EURUSD")
+    print("   2. AUDNZD")
+    print("   3. Custom pair")
+    
+    pair_choice = input("\nEnter pair choice (1-3): ").strip()
+    
+    if pair_choice == '1':
+        pair = 'EURUSD'
+    elif pair_choice == '2':
+        pair = 'AUDNZD'
+    elif pair_choice == '3':
+        pair = input("Enter custom pair (e.g., GBPUSD): ").strip().upper()
+    else:
+        print("⚠️  Invalid choice, using EURUSD")
+        pair = 'EURUSD'
+    
+    # Get timeframe selection
+    print(f"\n⏰ Select timeframe for {pair}:")
+    print("   1. Daily (1D)")
+    print("   2. 2Daily (2D)")  
+    print("   3. 3Daily (3D)")
+    print("   4. 4Daily (4D)")
+    print("   5. Weekly")
+    print("   6. H12 (12 Hour)")
+    print("   7. H4 (4 Hour)")
+    
+    tf_choice = input("\nEnter timeframe choice (1-7): ").strip()
+    
+    if tf_choice == '1':
+        timeframe = 'Daily'
+    elif tf_choice == '2':
+        timeframe = '2Daily'
+    elif tf_choice == '3':
+        timeframe = '3Daily'
+    elif tf_choice == '4':
+        timeframe = '4Daily'
+    elif tf_choice == '5':
+        timeframe = 'Weekly'
+    elif tf_choice == '6':
+        timeframe = 'H12'
+    elif tf_choice == '7':
+        timeframe = 'H4'
+    else:
+        print("⚠️  Invalid choice, using Daily")
+        timeframe = 'Daily'
+    
     # Get user input for backtest period
-    print("\n📅 Select backtest period:")
+    print(f"\n📅 Select backtest period for {pair} {timeframe}:")
     print("   1. Last 6 months (180 days)")
     print("   2. Last 1 year (365 days)")  
     print("   3. Last 2 years (730 days)")
     print("   4. Last 3 years (1095 days)")
-    print("   5. Custom days")
+    print("   5. All available data")
+    print("   6. Custom days")
     
-    choice = input("\nEnter your choice (1-5): ").strip()
+    choice = input("\nEnter your choice (1-6): ").strip()
     
     if choice == '1':
         days_back = 180
@@ -569,6 +859,8 @@ def main():
     elif choice == '4':
         days_back = 1095
     elif choice == '5':
+        days_back = 9999  # Use all available data
+    elif choice == '6':
         try:
             days_back = int(input("Enter number of days back: "))
             if days_back < 100:
@@ -581,12 +873,14 @@ def main():
         print("⚠️  Invalid choice, using default 730 days")
         days_back = 730
     
-    # Run analysis
+    # Run analysis with selected parameters
+    print(f"\n🚀 Starting backtest: {pair} {timeframe} - {days_back} days")
+    
     backtester = FixedMomentumVsReversalBacktester()
-    results = backtester.run_comprehensive_analysis(days_back)
+    results = backtester.run_comprehensive_analysis(days_back, timeframe, pair)
     
     print(f"\n✅ Analysis complete! Results saved to results/ directory")
-    print(f"⏱️  Estimated runtime: ~{len(backtester.distance_thresholds) * 2 * 5} seconds")
+    print(f"📊 Pair: {pair} | Timeframe: {timeframe} | Period: {days_back} days")
 
 if __name__ == "__main__":
     main()
