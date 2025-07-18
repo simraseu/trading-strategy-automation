@@ -121,92 +121,53 @@ class SignalGenerator:
     
     def filter_zones_by_trend(self, zones: Dict, current_trend: str) -> List[Dict]:
         """
-        Enhanced filter for momentum and reversal patterns based on trend alignment
+        SIMPLIFIED: Filter zones based on EMA50 vs EMA200 only
+        MA50 > MA200 = Only longs (R-B-R, D-B-R)  
+        MA50 < MA200 = Only shorts (D-B-D, R-B-D)
         
         Args:
-            zones: Dictionary with zone patterns (momentum + reversal)
-            current_trend: Current trend classification
+            zones: Dictionary with zone patterns
+            current_trend: Current trend classification (unused - we check EMAs directly)
             
         Returns:
             List of trend-aligned zones
         """
         aligned_zones = []
         
-        # Define trend alignment rules
-        bullish_trends = ['strong_bullish', 'medium_bullish', 'weak_bullish']
-        bearish_trends = ['strong_bearish', 'medium_bearish', 'weak_bearish']
+        # Get current EMA values directly from trend classifier
+        trend_data = self.trend_classifier.classify_trend_with_filter()
+        current_ema50 = trend_data['ema_50'].iloc[-1]
+        current_ema200 = trend_data['ema_200'].iloc[-1]
         
-        # Get all zones (momentum + reversal patterns)
-        momentum_zones = zones.get('dbd_patterns', []) + zones.get('rbr_patterns', [])
-        reversal_zones = []
+        # SIMPLE TREND DETERMINATION
+        if current_ema50 > current_ema200:
+            trend_direction = "BULLISH"
+            allowed_patterns = ['R-B-R', 'D-B-R']  # Only long patterns
+        else:
+            trend_direction = "BEARISH" 
+            allowed_patterns = ['D-B-D', 'R-B-D']  # Only short patterns
         
-        # Handle new structure if available
-        if 'reversal_patterns' in zones:
-            reversal_zones = (zones['reversal_patterns'].get('dbr_patterns', []) + 
-                            zones['reversal_patterns'].get('rbd_patterns', []))
+        print(f"   SIMPLE TREND: EMA50={current_ema50:.5f}, EMA200={current_ema200:.5f}")
+        print(f"   DIRECTION: {trend_direction} - Allowing: {', '.join(allowed_patterns)}")
         
-        all_zones = momentum_zones + reversal_zones
+        # Get all zone types including reversals
+        all_zones = (zones['dbd_patterns'] + zones['rbr_patterns'] + 
+                    zones.get('dbr_patterns', []) + zones.get('rbd_patterns', []))
         
-        print(f"   DEBUG: Current trend = {current_trend}")
-        print(f"   DEBUG: Momentum zones = {len(momentum_zones)}")
-        print(f"   DEBUG: Reversal zones = {len(reversal_zones)}")
-        print(f"   DEBUG: Total zones to check = {len(all_zones)}")
-        
-        recent_zone_count = 0
-        momentum_kept = 0
-        reversal_kept = 0
-        
+        # Filter zones by simple trend rule
         for zone in all_zones:
             zone_type = zone['type']
-            zone_category = zone.get('category', 'momentum')  # Default to momentum for legacy
             
-            # Calculate zone age for debugging
-            if hasattr(self, 'data') and self.data is not None:
-                zone_end_date = self.data.index[zone['end_idx']]
-                days_ago = (self.data.index[-1] - zone_end_date).days
-                is_recent = days_ago <= 365
-            else:
-                days_ago = 0
-                is_recent = True
-            
-            # Enhanced trend alignment logic
-            should_keep = False
-            
-            if current_trend in bullish_trends:
-                # MOMENTUM: Bullish trend + R-B-R demand zone
-                if zone_type == 'R-B-R':
-                    should_keep = True
-                    momentum_kept += 1
-                
-                # REVERSAL: Strong bearish reversal in weak bullish trend
-                elif zone_type == 'R-B-D' and current_trend == 'weak_bullish':
-                    should_keep = True
-                    reversal_kept += 1
-                    
-            elif current_trend in bearish_trends:
-                # MOMENTUM: Bearish trend + D-B-D supply zone
-                if zone_type == 'D-B-D':
-                    should_keep = True
-                    momentum_kept += 1
-                
-                # REVERSAL: Strong bullish reversal in weak bearish trend
-                elif zone_type == 'D-B-R' and current_trend == 'weak_bearish':
-                    should_keep = True
-                    reversal_kept += 1
-            
-            # Add to aligned zones if should keep
-            if should_keep:
+            if zone_type in allowed_patterns:
                 aligned_zones.append(zone)
                 
-                # Debug output for recent zones
-                if is_recent:
-                    recent_zone_count += 1
-                    print(f"   DEBUG KEPT: {zone_type} ({zone_category}) zone {days_ago} days ago")
+                # Calculate zone age for debugging
+                if hasattr(self, 'data') and self.data is not None:
+                    zone_end_date = self.data.index[zone['end_idx']]
+                    days_ago = (self.data.index[-1] - zone_end_date).days
+                    print(f"   KEPT: {zone_type} zone ({days_ago} days ago)")
         
-        print(f"   DEBUG: Recent zones processed: {recent_zone_count}")
-        print(f"   DEBUG: Momentum zones kept: {momentum_kept}")
-        print(f"   DEBUG: Reversal zones kept: {reversal_kept}")
-        print(f"   DEBUG: Total zones kept: {len(aligned_zones)}")
+        print(f"   RESULT: {len(aligned_zones)} zones align with {trend_direction} trend")
         
         return aligned_zones
     
@@ -216,6 +177,14 @@ class SignalGenerator:
         Create complete trading signal with all parameters INCLUDING DATES
         """
         signal_id = f"{pair}_{zone_timeframe}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+
+        # Determine signal direction based on pattern type
+        if zone['type'] in ['R-B-R', 'D-B-R']:
+            signal_direction = 'BUY'
+        elif zone['type'] in ['D-B-D', 'R-B-D']:
+            signal_direction = 'SELL'
+        else:
+            signal_direction = 'BUY' if zone['type'] == 'R-B-R' else 'SELL'  # Fallback
         
         # GET ZONE FORMATION DATES from the stored data
         zone_start_date = self.data.index[zone['start_idx']]
@@ -238,7 +207,7 @@ class SignalGenerator:
             'zone_formation_period': f"{zone_start_date.strftime('%Y-%m-%d')} to {zone_end_date.strftime('%Y-%m-%d')}",
             
             # Trade Direction & Type
-            'direction': 'BUY' if zone['type'] == 'R-B-R' else 'SELL',
+            'direction': signal_direction,
             'signal_type': zone['type'],
             'entry_method': risk_data.get('entry_method', 'manual_strategy'),
             

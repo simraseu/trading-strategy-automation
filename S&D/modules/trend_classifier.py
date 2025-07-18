@@ -250,36 +250,31 @@ class TrendClassifier:
         
         return separation_score
 
-    def classify_trend_with_filter(self, min_separation=0.3) -> pd.DataFrame:
+    def classify_trend_with_filter(self, min_separation=0.0) -> pd.DataFrame:
         """
-        Classify trend with EMA separation filter
+        SIMPLIFIED: Just return EMA50 vs EMA200 comparison (no ranging filter)
         
-        Args:
-            min_separation: Minimum EMA separation required (0-1 scale)
-            
         Returns:
-            DataFrame with filtered trend classification
+            DataFrame with simplified trend classification
         """
-        print(f"🔍 Classifying trends with separation filter (min: {min_separation})...")
+        print(f"🔍 SIMPLIFIED trend classification (EMA50 vs EMA200 only)...")
         
-        # First, do normal trend classification
-        self.classify_trend()
+        # Calculate EMAs
+        self.calculate_emas()
         
-        # Calculate EMA separation
+        # Simple trend classification
+        self.data['trend_filtered'] = np.where(
+            self.data['ema_50'] > self.data['ema_200'], 
+            'bullish', 
+            'bearish'
+        )
+        
+        # Keep separation calculation for reference but don't use for filtering
         self.data['ema_separation'] = self.calculate_ema_separation()
         
-        # Apply separation filter
-        trending_mask = self.data['ema_separation'] >= min_separation
-        
-        # Create filtered trend column
-        self.data['trend_filtered'] = self.data['trend'].copy()
-        self.data.loc[~trending_mask, 'trend_filtered'] = 'ranging'
-        
-        # Update statistics
-        self.trends_filtered = self.data['trend_filtered'].value_counts()
-        
-        print(f"✅ Filtered trend classification complete:")
-        for trend_type, count in self.trends_filtered.items():
+        print(f"✅ Simplified trend classification complete:")
+        trend_counts = self.data['trend_filtered'].value_counts()
+        for trend_type, count in trend_counts.items():
             print(f"   {trend_type}: {count}")
         
         return self.data.copy()

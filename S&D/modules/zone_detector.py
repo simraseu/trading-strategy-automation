@@ -43,40 +43,32 @@ class ZoneDetector:
         self.logger = logging.getLogger(__name__)
         
     def detect_all_patterns(self, data: pd.DataFrame) -> Dict[str, List[Dict]]:
-        """Detect all zone patterns including momentum and reversal types"""
+        """Detect all zone patterns including reversals"""
         try:
             # Validate input data
             self.validate_data(data)
             
-            # Detect momentum patterns (trend continuation)
+            # Detect momentum patterns
             dbd_patterns = self.detect_dbd_patterns(data)
             rbr_patterns = self.detect_rbr_patterns(data)
             
-            # Detect reversal patterns (trend reversal)
+            # Detect reversal patterns
             dbr_patterns = self.detect_dbr_patterns(data)
             rbd_patterns = self.detect_rbd_patterns(data)
             
             total_patterns = len(dbd_patterns) + len(rbr_patterns) + len(dbr_patterns) + len(rbd_patterns)
             
             print(f"✅ Zone detection complete:")
-            print(f"   Momentum - D-B-D: {len(dbd_patterns)}")
-            print(f"   Momentum - R-B-R: {len(rbr_patterns)}")
-            print(f"   Reversal - D-B-R: {len(dbr_patterns)}")
-            print(f"   Reversal - R-B-D: {len(rbd_patterns)}")
-            print(f"   Total patterns: {total_patterns}")
+            print(f"   D-B-D patterns: {len(dbd_patterns)} (momentum)")
+            print(f"   R-B-R patterns: {len(rbr_patterns)} (momentum)")
+            print(f"   D-B-R patterns: {len(dbr_patterns)} (reversal)")
+            print(f"   R-B-D patterns: {len(rbd_patterns)} (reversal)")
             
             return {
-                'momentum_patterns': {
-                    'dbd_patterns': dbd_patterns,
-                    'rbr_patterns': rbr_patterns
-                },
-                'reversal_patterns': {
-                    'dbr_patterns': dbr_patterns,
-                    'rbd_patterns': rbd_patterns
-                },
-                # Legacy compatibility for existing code
                 'dbd_patterns': dbd_patterns,
                 'rbr_patterns': rbr_patterns,
+                'dbr_patterns': dbr_patterns,
+                'rbd_patterns': rbd_patterns,
                 'total_patterns': total_patterns
             }
             
@@ -162,6 +154,122 @@ class ZoneDetector:
                 pattern = self.create_pattern('D-B-D', 'momentum', leg_in, base, leg_out)
                 if pattern:  # Only add if pattern creation succeeded
                     patterns.append(pattern)
+                
+            except Exception as e:
+                continue
+        
+        return patterns
+    
+    def detect_dbr_patterns(self, data: pd.DataFrame) -> List[Dict]:
+        """
+        Detect D-B-R patterns: Bearish LEG-IN → BASE → Bullish LEG-OUT (Reversal)
+        """
+        patterns = []
+        
+        for i in range(len(data) - 4):  # Need at least 5 candles
+            try:
+                # STEP 1: Find bearish leg-in
+                leg_in = self.identify_leg_in(data, i, direction='bearish')
+                if not leg_in:
+                    continue
+                
+                # STEP 2: Find base after leg-in
+                base_start = leg_in['end_idx'] + 1
+                base = self.identify_base(data, base_start)
+                if not base:
+                    continue
+                
+                # STEP 3: Find bullish leg-out after base (REVERSAL)
+                leg_out_start = base['end_idx'] + 1
+                leg_out = self.validate_leg_out_breakout(data, leg_out_start, base, 'bullish')
+                if not leg_out:
+                    continue
+                
+                # STEP 4: Calculate zone boundaries (BASE ONLY)
+                zone_high = base['high']
+                zone_low = base['low']
+                
+                # STEP 5: Calculate leg-out ratio
+                zone_range = zone_high - zone_low
+                leg_out['ratio_to_base'] = leg_out['range'] / base['range'] if base['range'] > 0 else 0
+                
+                # STEP 6: Validate minimum distance requirement
+                if leg_out['ratio_to_base'] < 1.5:
+                    continue
+                
+                # Create D-B-R pattern
+                pattern = {
+                    'type': 'D-B-R',
+                    'start_idx': leg_in['start_idx'],
+                    'end_idx': leg_out['end_idx'],
+                    'leg_in': leg_in,
+                    'base': base,
+                    'leg_out': leg_out,
+                    'zone_high': zone_high,
+                    'zone_low': zone_low,
+                    'zone_range': zone_range,
+                    'strength': self.calculate_pattern_strength(leg_in, base, leg_out)
+                }
+                
+                patterns.append(pattern)
+                
+            except Exception as e:
+                continue
+        
+        return patterns
+
+    def detect_rbd_patterns(self, data: pd.DataFrame) -> List[Dict]:
+        """
+        Detect R-B-D patterns: Bullish LEG-IN → BASE → Bearish LEG-OUT (Reversal)
+        """
+        patterns = []
+        
+        for i in range(len(data) - 4):  # Need at least 5 candles
+            try:
+                # STEP 1: Find bullish leg-in
+                leg_in = self.identify_leg_in(data, i, direction='bullish')
+                if not leg_in:
+                    continue
+                
+                # STEP 2: Find base after leg-in
+                base_start = leg_in['end_idx'] + 1
+                base = self.identify_base(data, base_start)
+                if not base:
+                    continue
+                
+                # STEP 3: Find bearish leg-out after base (REVERSAL)
+                leg_out_start = base['end_idx'] + 1
+                leg_out = self.validate_leg_out_breakout(data, leg_out_start, base, 'bearish')
+                if not leg_out:
+                    continue
+                
+                # STEP 4: Calculate zone boundaries (BASE ONLY)
+                zone_high = base['high']
+                zone_low = base['low']
+                
+                # STEP 5: Calculate leg-out ratio
+                zone_range = zone_high - zone_low
+                leg_out['ratio_to_base'] = leg_out['range'] / base['range'] if base['range'] > 0 else 0
+                
+                # STEP 6: Validate minimum distance requirement
+                if leg_out['ratio_to_base'] < 1.5:
+                    continue
+                
+                # Create R-B-D pattern
+                pattern = {
+                    'type': 'R-B-D',
+                    'start_idx': leg_in['start_idx'],
+                    'end_idx': leg_out['end_idx'],
+                    'leg_in': leg_in,
+                    'base': base,
+                    'leg_out': leg_out,
+                    'zone_high': zone_high,
+                    'zone_low': zone_low,
+                    'zone_range': zone_range,
+                    'strength': self.calculate_pattern_strength(leg_in, base, leg_out)
+                }
+                
+                patterns.append(pattern)
                 
             except Exception as e:
                 continue
