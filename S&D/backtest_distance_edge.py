@@ -787,11 +787,23 @@ class FixedMomentumVsReversalBacktester:
         plt.show()
 
 def main():
-    """Main function with user input for pair, timeframe, and period"""
+    """Enhanced main function with multi-timeframe automation option"""
     print("🚀 ENHANCED: MOMENTUM VS REVERSAL BACKTESTING SYSTEM")
     print("=" * 60)
     
-    # Get currency pair selection
+    # NEW: Add multi-timeframe option
+    print("\n🎯 Select analysis mode:")
+    print("   1. Single timeframe analysis (original)")
+    print("   2. ALL timeframes automated (NEW!)")
+    
+    mode_choice = input("\nEnter mode choice (1-2): ").strip()
+    
+    if mode_choice == '2':
+        # NEW: Multi-timeframe automation
+        run_multi_timeframe_analysis()
+        return
+    
+    # EXISTING: Original single timeframe analysis
     print("\n💱 Select currency pair:")
     print("   1. EURUSD")
     print("   2. AUDNZD")
@@ -809,35 +821,26 @@ def main():
         print("⚠️  Invalid choice, using EURUSD")
         pair = 'EURUSD'
     
-    # Get timeframe selection
+    # Get timeframe selection (YOUR ACTUAL TIMEFRAMES)
     print(f"\n⏰ Select timeframe for {pair}:")
-    print("   1. Daily (1D)")
-    print("   2. 2Daily (2D)")  
-    print("   3. 3Daily (3D)")
-    print("   4. 4Daily (4D)")
-    print("   5. Weekly")
-    print("   6. H12 (12 Hour)")
-    print("   7. H4 (4 Hour)")
+    print("   1. 1D (Daily)")
+    print("   2. 2D (2-Daily)")  
+    print("   3. 3D (3-Daily)")
+    print("   4. 4D (4-Daily)")
     
-    tf_choice = input("\nEnter timeframe choice (1-7): ").strip()
+    tf_choice = input("\nEnter timeframe choice (1-4): ").strip()
     
     if tf_choice == '1':
-        timeframe = 'Daily'
+        timeframe = '1D'
     elif tf_choice == '2':
-        timeframe = '2Daily'
+        timeframe = '2D'
     elif tf_choice == '3':
-        timeframe = '3Daily'
+        timeframe = '3D'
     elif tf_choice == '4':
-        timeframe = '4Daily'
-    elif tf_choice == '5':
-        timeframe = 'Weekly'
-    elif tf_choice == '6':
-        timeframe = 'H12'
-    elif tf_choice == '7':
-        timeframe = 'H4'
+        timeframe = '4D'
     else:
-        print("⚠️  Invalid choice, using Daily")
-        timeframe = 'Daily'
+        print("⚠️  Invalid choice, using 1D")
+        timeframe = '1D'
     
     # Get user input for backtest period
     print(f"\n📅 Select backtest period for {pair} {timeframe}:")
@@ -881,6 +884,336 @@ def main():
     
     print(f"\n✅ Analysis complete! Results saved to results/ directory")
     print(f"📊 Pair: {pair} | Timeframe: {timeframe} | Period: {days_back} days")
+
+
+def run_multi_timeframe_analysis():
+    """NEW: Multi-timeframe automation function"""
+    print("\n🚀 MULTI-TIMEFRAME AUTOMATED ANALYSIS")
+    print("=" * 50)
+    
+    # Get currency pair selection
+    print("\n💱 Select currency pair:")
+    print("   1. EURUSD")
+    print("   2. AUDNZD") 
+    print("   3. GBPUSD")
+    print("   4. USDJPY")
+    print("   5. Custom pair")
+    
+    pair_choice = input("\nEnter pair choice (1-5): ").strip()
+    
+    if pair_choice == '1':
+        pair = 'EURUSD'
+    elif pair_choice == '2':
+        pair = 'AUDNZD'
+    elif pair_choice == '3':
+        pair = 'GBPUSD'
+    elif pair_choice == '4':
+        pair = 'USDJPY'
+    elif pair_choice == '5':
+        pair = input("Enter custom pair (e.g., CADJPY): ").strip().upper()
+    else:
+        print("⚠️  Invalid choice, using EURUSD")
+        pair = 'EURUSD'
+    
+    # Get analysis period
+    print(f"\n📅 Select analysis period for {pair}:")
+    print("   1. Standard (2 years - 730 days)")
+    print("   2. Extended (3 years - 1095 days)")
+    print("   3. Maximum (All available data)")
+    print("   4. Quick test (6 months - 180 days)")
+    
+    period_choice = input("\nEnter period choice (1-4): ").strip()
+    
+    if period_choice == '1':
+        days_back = 730
+    elif period_choice == '2':
+        days_back = 1095
+    elif period_choice == '3':
+        days_back = 9999
+    elif period_choice == '4':
+        days_back = 180
+    else:
+        days_back = 730
+    
+    # Define YOUR ACTUAL timeframes to test
+    timeframes = ['1D', '2D', '3D', '4D']
+    
+    print(f"\n✅ CONFIGURATION:")
+    print(f"   Pair: {pair}")
+    print(f"   Timeframes: {', '.join(timeframes)}")
+    print(f"   Period: {days_back} days")
+    
+    confirm = input(f"\n🚀 Start automated analysis? (y/n): ").strip().lower()
+    
+    if confirm != 'y':
+        print("❌ Analysis cancelled")
+        return
+    
+    # Run analysis for each timeframe
+    all_results = {}
+    
+    print(f"\n{'='*60}")
+    print(f"🚀 STARTING AUTOMATED MULTI-TIMEFRAME ANALYSIS")
+    print(f"{'='*60}")
+    
+    for i, timeframe in enumerate(timeframes, 1):
+        print(f"\n{'='*20} TIMEFRAME {i}/{len(timeframes)}: {timeframe} {'='*20}")
+        
+        try:
+            backtester = FixedMomentumVsReversalBacktester()
+            results = backtester.run_comprehensive_analysis(days_back, timeframe, pair)
+            all_results[timeframe] = results
+            
+            # Quick summary
+            if results:
+                valid_results = [r for r in results if r['total_trades'] > 0]
+                if valid_results:
+                    best = max(valid_results, key=lambda x: x['profit_factor'])
+                    print(f"✅ Best for {timeframe}: {best['strategy']} @ {best['distance_threshold']}x")
+                    print(f"   PF: {best['profit_factor']}, WR: {best['win_rate']}%, {best['total_trades']} trades")
+                else:
+                    print(f"⚠️  No profitable strategies for {timeframe}")
+            
+        except Exception as e:
+            print(f"❌ Error analyzing {timeframe}: {e}")
+            all_results[timeframe] = None
+            continue
+    
+    # Generate final comparison report
+    generate_multi_timeframe_report(pair, all_results)
+    
+    # NEW: Create multi-timeframe visualization
+    create_multi_timeframe_summary_chart(pair, all_results)
+
+
+def generate_multi_timeframe_report(pair: str, all_results: Dict):
+    """Generate comprehensive multi-timeframe comparison report"""
+    print(f"\n{'='*80}")
+    print(f"📊 FINAL MULTI-TIMEFRAME COMPARISON REPORT: {pair}")
+    print(f"{'='*80}")
+    
+    # Create master comparison table
+    print(f"\n{'Timeframe':<12} {'Best Strategy':<15} {'Distance':<10} {'Trades':<8} "
+          f"{'Win Rate':<10} {'Profit Factor':<15} {'Return %':<12}")
+    print("-" * 85)
+    
+    best_performers = []
+    
+    for timeframe, results in all_results.items():
+        if not results:
+            print(f"{timeframe:<12} {'NO DATA':<15}")
+            continue
+        
+        # Find best performer for this timeframe
+        valid_results = [r for r in results if r['total_trades'] > 0]
+        
+        if valid_results:
+            best = max(valid_results, key=lambda x: x['profit_factor'])
+            best_performers.append({
+                'timeframe': timeframe,
+                'strategy': best['strategy'],
+                'distance': best['distance_threshold'],
+                'trades': best['total_trades'],
+                'win_rate': best['win_rate'],
+                'profit_factor': best['profit_factor'],
+                'return_pct': best['total_return']
+            })
+            
+            print(f"{timeframe:<12} {best['strategy']:<15} {best['distance_threshold']:<10} "
+                  f"{best['total_trades']:<8} {best['win_rate']:<10}% "
+                  f"{best['profit_factor']:<15} {best['total_return']:<12}%")
+        else:
+            print(f"{timeframe:<12} {'NO TRADES':<15}")
+    
+    # Overall winners
+    if best_performers:
+        print(f"\n🏆 OVERALL WINNERS ACROSS ALL TIMEFRAMES:")
+        
+        # Highest profit factor
+        best_pf = max(best_performers, key=lambda x: x['profit_factor'])
+        print(f"   🥇 Highest Profit Factor: {best_pf['timeframe']} {best_pf['strategy']} "
+              f"@ {best_pf['distance']}x → PF: {best_pf['profit_factor']}")
+        
+        # Highest return
+        best_return = max(best_performers, key=lambda x: x['return_pct'])
+        print(f"   💰 Highest Return: {best_return['timeframe']} {best_return['strategy']} "
+              f"@ {best_return['distance']}x → {best_return['return_pct']}% return")
+        
+        # Best win rate
+        best_wr = max(best_performers, key=lambda x: x['win_rate'])
+        print(f"   🎯 Best Win Rate: {best_wr['timeframe']} {best_wr['strategy']} "
+              f"@ {best_wr['distance']}x → {best_wr['win_rate']}% WR")
+        
+        # Most active
+        most_trades = max(best_performers, key=lambda x: x['trades'])
+        print(f"   📊 Most Active: {most_trades['timeframe']} {most_trades['strategy']} "
+              f"@ {most_trades['distance']}x → {most_trades['trades']} trades")
+        
+        # Best timeframe overall
+        tf_avg_pf = {}
+        for perf in best_performers:
+            tf = perf['timeframe']
+            if tf not in tf_avg_pf:
+                tf_avg_pf[tf] = []
+            tf_avg_pf[tf].append(perf['profit_factor'])
+        
+        if tf_avg_pf:
+            tf_averages = {tf: sum(pfs)/len(pfs) for tf, pfs in tf_avg_pf.items()}
+            best_tf = max(tf_averages.keys(), key=lambda x: tf_averages[x])
+            
+            print(f"\n🎯 RECOMMENDED TIMEFRAME: {best_tf}")
+            print(f"   Average performance: {tf_averages[best_tf]:.2f} PF")
+            
+            # Show all timeframe rankings
+            print(f"\n📈 TIMEFRAME PERFORMANCE RANKING:")
+            sorted_tf = sorted(tf_averages.items(), key=lambda x: x[1], reverse=True)
+            for i, (tf, avg_pf) in enumerate(sorted_tf, 1):
+                print(f"   {i}. {tf}: {avg_pf:.2f} PF")
+    
+    else:
+        print(f"\n❌ No profitable strategies found across any timeframes")
+        print(f"💡 Consider:")
+        print(f"   • Longer analysis period")
+        print(f"   • Different currency pair")
+        print(f"   • Lower distance thresholds")
+    
+    print(f"\n✅ Multi-timeframe analysis complete for {pair}!")
+    print(f"📁 Individual timeframe charts saved in results/ directory")
+
+
+def create_multi_timeframe_summary_chart(pair: str, all_results: Dict):
+    """Create summary visualization across all timeframes"""
+    import matplotlib.pyplot as plt
+    import numpy as np
+    from datetime import datetime
+    
+    print(f"\n📊 Creating multi-timeframe summary chart...")
+    
+    # Collect data for visualization
+    timeframes = ['1D', '2D', '3D', '4D']
+    momentum_pf = []
+    reversal_pf = []
+    momentum_trades = []
+    reversal_trades = []
+    
+    for tf in timeframes:
+        if tf in all_results and all_results[tf]:
+            # Get best momentum and reversal results for this timeframe
+            momentum_results = [r for r in all_results[tf] if r['strategy'] == 'Momentum' and r['total_trades'] > 0]
+            reversal_results = [r for r in all_results[tf] if r['strategy'] == 'Reversal' and r['total_trades'] > 0]
+            
+            momentum_pf.append(max([r['profit_factor'] for r in momentum_results], default=0))
+            reversal_pf.append(max([r['profit_factor'] for r in reversal_results], default=0))
+            momentum_trades.append(sum([r['total_trades'] for r in momentum_results]))
+            reversal_trades.append(sum([r['total_trades'] for r in reversal_results]))
+        else:
+            momentum_pf.append(0)
+            reversal_pf.append(0)
+            momentum_trades.append(0)
+            reversal_trades.append(0)
+    
+    # Create the chart
+    fig, ((ax1, ax2), (ax3, ax4)) = plt.subplots(2, 2, figsize=(16, 12))
+    
+    # Plot 1: Profit Factor Comparison
+    x = np.arange(len(timeframes))
+    width = 0.35
+    
+    ax1.bar(x - width/2, momentum_pf, width, label='Momentum', color='steelblue', alpha=0.8)
+    ax1.bar(x + width/2, reversal_pf, width, label='Reversal', color='darkorange', alpha=0.8)
+    ax1.axhline(y=1.0, color='red', linestyle='--', alpha=0.7, label='Break-even')
+    
+    ax1.set_title(f'{pair}: Best Profit Factor by Timeframe', fontweight='bold')
+    ax1.set_xlabel('Timeframe')
+    ax1.set_ylabel('Profit Factor')
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(timeframes)
+    ax1.legend()
+    ax1.grid(True, alpha=0.3, axis='y')
+    
+    # Add value labels
+    for i, (m_pf, r_pf) in enumerate(zip(momentum_pf, reversal_pf)):
+        if m_pf > 0:
+            ax1.text(i - width/2, m_pf + 0.05, f'{m_pf:.1f}', ha='center', va='bottom', fontsize=9)
+        if r_pf > 0:
+            ax1.text(i + width/2, r_pf + 0.05, f'{r_pf:.1f}', ha='center', va='bottom', fontsize=9)
+    
+    # Plot 2: Trade Count Comparison
+    ax2.bar(x - width/2, momentum_trades, width, label='Momentum', color='steelblue', alpha=0.8)
+    ax2.bar(x + width/2, reversal_trades, width, label='Reversal', color='darkorange', alpha=0.8)
+    
+    ax2.set_title(f'{pair}: Total Trades by Timeframe', fontweight='bold')
+    ax2.set_xlabel('Timeframe')
+    ax2.set_ylabel('Number of Trades')
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(timeframes)
+    ax2.legend()
+    ax2.grid(True, alpha=0.3, axis='y')
+    
+    # Plot 3: Combined Performance Score
+    combined_scores = []
+    for i in range(len(timeframes)):
+        # Simple scoring: PF * log(trades + 1) to favor both profitability and activity
+        momentum_score = momentum_pf[i] * np.log(momentum_trades[i] + 1)
+        reversal_score = reversal_pf[i] * np.log(reversal_trades[i] + 1)
+        combined_scores.append(max(momentum_score, reversal_score))
+    
+    colors = ['gold' if score == max(combined_scores) else 'lightblue' for score in combined_scores]
+    bars = ax3.bar(timeframes, combined_scores, color=colors, alpha=0.8, edgecolor='navy')
+    
+    ax3.set_title(f'{pair}: Overall Performance Score by Timeframe', fontweight='bold')
+    ax3.set_xlabel('Timeframe')
+    ax3.set_ylabel('Performance Score (PF × log(Trades))')
+    ax3.grid(True, alpha=0.3, axis='y')
+    
+    # Highlight best performer
+    best_idx = combined_scores.index(max(combined_scores))
+    if max(combined_scores) > 0:
+        ax3.annotate(f'Best: {timeframes[best_idx]}', 
+                    xy=(best_idx, combined_scores[best_idx]),
+                    xytext=(10, 10), textcoords='offset points',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor='yellow', alpha=0.7),
+                    arrowprops=dict(arrowstyle='->', connectionstyle='arc3,rad=0'))
+    
+    # Plot 4: Win Rate Heatmap (if we have that data)
+    # For now, show strategy preference by timeframe
+    strategy_preference = []
+    for i in range(len(timeframes)):
+        if momentum_pf[i] > reversal_pf[i]:
+            strategy_preference.append(1)  # Momentum preferred
+        elif reversal_pf[i] > momentum_pf[i]:
+            strategy_preference.append(-1)  # Reversal preferred
+        else:
+            strategy_preference.append(0)  # Tie or no data
+    
+    colors_pref = ['steelblue' if pref == 1 else 'darkorange' if pref == -1 else 'gray' 
+                   for pref in strategy_preference]
+    
+    ax4.bar(timeframes, [abs(p) for p in strategy_preference], color=colors_pref, alpha=0.8)
+    ax4.set_title(f'{pair}: Preferred Strategy by Timeframe', fontweight='bold')
+    ax4.set_xlabel('Timeframe')
+    ax4.set_ylabel('Strategy Preference')
+    ax4.set_ylim(0, 1.2)
+    
+    # Add strategy labels
+    for i, (tf, pref) in enumerate(zip(timeframes, strategy_preference)):
+        if pref == 1:
+            ax4.text(i, 0.5, 'Momentum', ha='center', va='center', fontweight='bold', color='white')
+        elif pref == -1:
+            ax4.text(i, 0.5, 'Reversal', ha='center', va='center', fontweight='bold', color='white')
+        else:
+            ax4.text(i, 0.5, 'No Data', ha='center', va='center', fontweight='bold')
+    
+    plt.tight_layout()
+    
+    # Save chart
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+    filename = f"results/multi_timeframe_summary_{pair}_{timestamp}.png"
+    os.makedirs('results', exist_ok=True)
+    plt.savefig(filename, dpi=300, bbox_inches='tight')
+    print(f"✅ Multi-timeframe summary chart saved: {filename}")
+    
+    plt.show()
 
 if __name__ == "__main__":
     main()
