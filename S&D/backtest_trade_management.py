@@ -359,114 +359,122 @@ class TradeManagementBacktester:
             return self.empty_result(pair, timeframe, strategy_name, str(e))
     
     def backtest_with_management(self, data: pd.DataFrame, patterns: Dict,
-                               trend_data: pd.DataFrame, risk_manager: RiskManager,
-                               strategy_config: Dict, pair: str, timeframe: str,
-                               strategy_name: str) -> Dict:
-        """Enhanced backtesting with advanced trade management"""
-        
-        # Use BOTH momentum and reversal patterns (like distance_edge.py)
+                             trend_data: pd.DataFrame, risk_manager: RiskManager,
+                             strategy_config: Dict, pair: str, timeframe: str,
+                             strategy_name: str) -> Dict:
+        """Enhanced backtesting with proven zone selection and trade management"""
+
+        # Step 1: Combine all patterns (momentum + reversal)
         momentum_patterns = patterns['dbd_patterns'] + patterns['rbr_patterns']
         reversal_patterns = patterns.get('dbr_patterns', []) + patterns.get('rbd_patterns', [])
         all_patterns = momentum_patterns + reversal_patterns
 
+        # Step 2: Cumulative distance filtering (like distance_edge.py)
         valid_patterns = []
         for pattern in all_patterns:
             if 'leg_out' in pattern and 'ratio_to_base' in pattern['leg_out']:
-                if pattern['leg_out']['ratio_to_base'] >= 2.5:  # Cumulative logic
+                if pattern['leg_out']['ratio_to_base'] >= 2.0:  # Replace with 2.5 if preferred
                     valid_patterns.append(pattern)
-        
+
         if not valid_patterns:
             return self.empty_result(pair, timeframe, strategy_name, "No valid patterns")
-        
-        # Initialize tracking
+
+        # Step 3: Build zone activation schedule (chronological processing)
+        zone_activation_schedule = []
+        for pattern in valid_patterns:
+            zone_end_idx = pattern.get('end_idx', pattern.get('base', {}).get('end_idx'))
+            if zone_end_idx is not None and zone_end_idx < len(data):
+                activation_date = data.index[zone_end_idx]
+                zone_activation_schedule.append({
+                    'date': activation_date,
+                    'pattern': pattern,
+                    'zone_id': f"{pattern['type']}_{zone_end_idx}_{pattern['zone_low']:.5f}"
+                })
+
+        # Step 4: Sort by activation date (CRUCIAL)
+        zone_activation_schedule.sort(key=lambda x: x['date'])
+
+        # Step 5: Initialize tracking
         trades = []
         account_balance = 10000
         used_zones = set()
-        
-        # Add ATR calculation if needed
-        if strategy_config['type'] in ['atr_trailing', 'atr_immediate']:
-            atr_data = self.atr_calculator.calculate_atr(data)
-        else:
-            atr_data = None
-        
-        # Process zones chronologically
-        for pattern in valid_patterns:
-            zone_id = f"{pattern['type']}_{pattern.get('end_idx', 0)}_{pattern['zone_low']:.5f}"
-            
+
+        # Step 6: ATR Calculation (if needed)
+        atr_data = self.atr_calculator.calculate_atr(data) if strategy_config['type'] in ['atr_trailing', 'atr_immediate'] else None
+
+        # Step 7: Loop through zones chronologically
+        for zone_info in zone_activation_schedule:
+            pattern = zone_info['pattern']
+            zone_id = zone_info['zone_id']
+
             if zone_id in used_zones:
                 continue
-                
-            # Check trend alignment (your existing logic)
+
             zone_end_idx = pattern.get('end_idx', pattern.get('base', {}).get('end_idx'))
             if zone_end_idx is None or zone_end_idx >= len(trend_data):
                 continue
-                
-            current_trend = trend_data['trend'].iloc[zone_end_idx]            
-            # Only trade trend-aligned zones (simplified: just bullish/bearish)
-            is_aligned = False
-            if pattern['type'] in ['R-B-R', 'D-B-R'] and current_trend == 'bullish':
-                is_aligned = True
-            elif pattern['type'] in ['D-B-D', 'R-B-D'] and current_trend == 'bearish':
-                is_aligned = True
-                
+
+            # Step 8: Trend alignment logic
+            current_trend = trend_data['trend'].iloc[zone_end_idx]
+            is_aligned = (
+                (pattern['type'] in ['R-B-R', 'D-B-R'] and current_trend == 'bullish') or
+                (pattern['type'] in ['D-B-D', 'R-B-D'] and current_trend == 'bearish')
+            )
+
             if not is_aligned:
                 continue
-            
-            # Execute trade with enhanced management
+
+            # Step 9: Execute trade
             trade_result = self.execute_trade_with_management(
                 pattern, data, strategy_config, atr_data, zone_end_idx
             )
-            
+
             if trade_result:
                 trades.append(trade_result)
                 account_balance += trade_result['pnl']
                 used_zones.add(zone_id)
-        
-        # Calculate performance metrics
+
+        # Step 10: Final performance calculation
         return self.calculate_enhanced_performance(
             trades, account_balance, pair, timeframe, strategy_name, strategy_config
         )
+
     
-    def execute_trade_with_management(self, zone: Dict, data: pd.DataFrame,
-                                    strategy_config: Dict, atr_data: Optional[pd.Series],
-                                    zone_end_idx: int) -> Optional[Dict]:
-        """Execute trade with advanced management logic"""
+    def execute_trade_with_management(self, pattern: Dict, data: pd.DataFrame,
+                                  strategy_config: Dict, atr_data: Optional[pd.Series],
+                                  zone_end_idx: int) -> Optional[Dict]:
+        """Execute trade using proven distance_edge.py logic"""
         
-        zone_high = zone['zone_high']
-        zone_low = zone['zone_low']
+        # Extract zone boundaries
+        zone_high = pattern['zone_high']
+        zone_low = pattern['zone_low']
         zone_range = zone_high - zone_low
-        
-        # Entry logic (your proven 5% front-run)
-        if zone['type'] in ['R-B-R', 'D-B-R']:  # Buy
+
+        # Step 1: Entry and stop logic (5% front-run, 33% buffer)
+        if pattern['type'] in ['R-B-R', 'D-B-R']:  # BUY
             entry_price = zone_low + (zone_range * 0.05)
             direction = 'BUY'
-        else:  # Sell
+            initial_stop = zone_low - (zone_range * 0.33)
+        else:  # SELL
             entry_price = zone_high - (zone_range * 0.05)
             direction = 'SELL'
-        
-        # Initial stop loss (your proven 33% buffer)
-        if direction == 'BUY':
-            initial_stop = zone_low - (zone_range * 0.33)
-        else:
             initial_stop = zone_high + (zone_range * 0.33)
-        
-        # Risk management
-        risk_amount = 500  # Your fixed $500 risk
+
+        # Step 2: Fixed $500 risk per trade
         stop_distance = abs(entry_price - initial_stop)
-        
         if stop_distance <= 0:
-            return None
-            
+            return None  # Invalid stop distance
+
+        risk_amount = 500
         position_size = risk_amount / stop_distance
-        
-        # Look for entry execution
+
+        # Step 3: Entry scanning logic (first candle to touch entry)
         entry_date = None
         entry_idx = None
-        
+
         for i in range(zone_end_idx + 1, len(data)):
             candle = data.iloc[i]
-            
-            # Check if entry triggered
+
             if direction == 'BUY' and candle['low'] <= entry_price:
                 entry_date = data.index[i]
                 entry_idx = i
@@ -475,15 +483,16 @@ class TradeManagementBacktester:
                 entry_date = data.index[i]
                 entry_idx = i
                 break
-        
+
         if entry_idx is None:
             return None  # Entry never triggered
-        
-        # Simulate trade with enhanced management
+
+        # Step 4: Simulate trade with your management logic
         return self.simulate_enhanced_trade_outcome(
-            zone, entry_price, initial_stop, entry_idx, data,
+            pattern, entry_price, initial_stop, entry_idx, data,
             strategy_config, atr_data, direction, position_size, risk_amount
         )
+
     
     def simulate_enhanced_trade_outcome(self, zone: Dict, entry_price: float,
                                       initial_stop: float, entry_idx: int,
