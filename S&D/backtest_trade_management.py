@@ -325,9 +325,12 @@ class TradeManagementBacktester:
             if len(data) < 100:
                 return self.empty_result(pair, timeframe, strategy_name, "Insufficient data")
                 
-            # Limit data to test period
-            if days_back < len(data):
+            # Limit data to test period (unless using all data)
+            if days_back < 99999 and days_back < len(data):
                 data = data.iloc[-days_back:]
+                print(f"   📊 Using last {days_back} days ({len(data)} candles)")
+            else:
+                print(f"   📊 Using ALL available data ({len(data)} candles)")
             
             # Initialize your existing trading components
             candle_classifier = CandleClassifier(data)
@@ -337,8 +340,7 @@ class TradeManagementBacktester:
             patterns = zone_detector.detect_all_patterns(classified_data)
             
             trend_classifier = TrendClassifier(data)
-            trend_data = trend_classifier.classify_trend_with_filter()
-            
+            trend_data = trend_classifier.classify_trend_simplified()               
             risk_manager = RiskManager(account_balance=10000)
             
             # Get strategy configuration
@@ -362,13 +364,15 @@ class TradeManagementBacktester:
                                strategy_name: str) -> Dict:
         """Enhanced backtesting with advanced trade management"""
         
-        # Filter patterns by distance (your proven 2.5x requirement)
-        all_patterns = patterns['dbd_patterns'] + patterns['rbr_patterns']
+        # Use BOTH momentum and reversal patterns (like distance_edge.py)
+        momentum_patterns = patterns['dbd_patterns'] + patterns['rbr_patterns']
+        reversal_patterns = patterns.get('dbr_patterns', []) + patterns.get('rbd_patterns', [])
+        all_patterns = momentum_patterns + reversal_patterns
+
         valid_patterns = []
-        
         for pattern in all_patterns:
             if 'leg_out' in pattern and 'ratio_to_base' in pattern['leg_out']:
-                if pattern['leg_out']['ratio_to_base'] >= 2.5:  # Your optimal distance
+                if pattern['leg_out']['ratio_to_base'] >= 2.5:  # Cumulative logic
                     valid_patterns.append(pattern)
         
         if not valid_patterns:
@@ -397,13 +401,12 @@ class TradeManagementBacktester:
             if zone_end_idx is None or zone_end_idx >= len(trend_data):
                 continue
                 
-            current_trend = trend_data['trend_filtered'].iloc[zone_end_idx]
-            
-            # Only trade trend-aligned zones
+            current_trend = trend_data['trend'].iloc[zone_end_idx]            
+            # Only trade trend-aligned zones (simplified: just bullish/bearish)
             is_aligned = False
-            if pattern['type'] in ['R-B-R', 'D-B-R'] and current_trend in ['strong_bullish', 'medium_bullish', 'weak_bullish']:
+            if pattern['type'] in ['R-B-R', 'D-B-R'] and current_trend == 'bullish':
                 is_aligned = True
-            elif pattern['type'] in ['D-B-D', 'R-B-D'] and current_trend in ['strong_bearish', 'medium_bearish', 'weak_bearish']:
+            elif pattern['type'] in ['D-B-D', 'R-B-D'] and current_trend == 'bearish':
                 is_aligned = True
                 
             if not is_aligned:
@@ -722,11 +725,15 @@ class TradeManagementBacktester:
         durations = [t['days_held'] for t in trades]
         avg_duration = np.mean(durations) if durations else 0
 
-        # 🆕 NEW: Winner-specific duration analysis
-        winner_durations = [t['days_held'] for t in winning_trades]
-        loser_durations = [t['days_held'] for t in losing_trades]
-        breakeven_durations = [t['days_held'] for t in breakeven_trades]
-        
+        # 🆕 NEW: Winner-specific duration analysis (FIXED)
+        winning_trade_objects = [t for t in trades if t['pnl'] > 0]
+        losing_trade_objects = [t for t in trades if t['pnl'] < 0]
+        breakeven_trade_objects = [t for t in trades if t['pnl'] == 0]
+
+        winner_durations = [t['days_held'] for t in winning_trade_objects]
+        loser_durations = [t['days_held'] for t in losing_trade_objects]
+        breakeven_durations = [t['days_held'] for t in breakeven_trade_objects]
+
         avg_winner_duration = np.mean(winner_durations) if winner_durations else 0
         avg_loser_duration = np.mean(loser_durations) if loser_durations else 0
         avg_breakeven_duration = np.mean(breakeven_durations) if breakeven_durations else 0
@@ -922,9 +929,9 @@ class TradeManagementBacktester:
         """Save comprehensive results to Excel file"""
         
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        filename = f"results/trade_management_analysis_{timestamp}.xlsx"
-        
-        os.makedirs('results', exist_ok=True)
+        export_path = r"C:\Users\sim\Desktop\Quant\OTC\trading-strategy-automation\results\trademanagement"
+        os.makedirs(export_path, exist_ok=True)
+        filename = os.path.join(export_path, f"trade_management_analysis_{timestamp}.xlsx")
         
         with pd.ExcelWriter(filename, engine='openpyxl') as writer:
         
@@ -1095,82 +1102,287 @@ class TradeManagementBacktester:
             print(f"   Fastest Winners: {fastest_winners['strategy']} → {fastest_winners['avg_winner_duration']:.1f} days")
             print(f"   Slowest Winners: {slowest_winners['strategy']} → {slowest_winners['avg_winner_duration']:.1f} days")
 
-def main():
-    """Main execution function"""
+import multiprocessing as mp
+from concurrent.futures import ProcessPoolExecutor, as_completed
+import time
+class ParallelTradeManagementBacktester(TradeManagementBacktester):
+    """Optimized parallel backtesting for i5-10400F (6C/12T)"""
     
-    print("🎯 ADVANCED TRADE MANAGEMENT BACKTESTING SYSTEM")
+    def __init__(self, max_workers: int = 10):
+        super().__init__()
+        # Optimal for i5-10400F: 10 workers (leave 2 threads for system)
+        self.max_workers = min(max_workers, mp.cpu_count())
+        
+    def run_parallel_comprehensive_analysis(self, test_all: bool = False, 
+                                          pairs: List[str] = None, 
+                                          timeframes: List[str] = None,
+                                          strategies: List[str] = None,
+                                          days_back: int = 730) -> pd.DataFrame:
+        """Run comprehensive analysis with parallel processing"""
+        
+        print("🚀 PARALLEL TRADE MANAGEMENT ANALYSIS")
+        print("=" * 60)
+        
+        # Get test configurations
+        test_combinations = self._prepare_test_combinations(
+            test_all, pairs, timeframes, strategies, days_back
+        )
+        
+        if not test_combinations:
+            print("❌ No test combinations found!")
+            return pd.DataFrame()
+        
+        total_tests = len(test_combinations)
+        estimated_time_single = total_tests * 3.5  # seconds
+        estimated_time_parallel = estimated_time_single / 9  # Expected 9x speedup
+        
+        print(f"\n📋 PERFORMANCE PROJECTION:")
+        print(f"   Total tests: {total_tests}")
+        print(f"   Workers: {self.max_workers}")
+        print(f"   Single-threaded time: {estimated_time_single/60:.1f} minutes")
+        print(f"   Parallel time estimate: {estimated_time_parallel/60:.1f} minutes")
+        print(f"   Expected speedup: {estimated_time_single/estimated_time_parallel:.1f}x")
+        
+        confirm = input(f"\n🚀 Start parallel analysis? (y/n): ").strip().lower()
+        if confirm != 'y':
+            print("Analysis cancelled.")
+            return pd.DataFrame()
+        
+        # Run parallel processing
+        results = self._run_parallel_tests(test_combinations)
+        
+        # Convert to DataFrame and save
+        df = pd.DataFrame(results)
+        self.save_results_to_excel(df)
+        self.generate_summary_report(df)
+        
+        return df
+    
+    def _prepare_test_combinations(self, test_all: bool, pairs: List[str], 
+                                 timeframes: List[str], strategies: List[str],
+                                 days_back: int) -> List[Dict]:
+        """Prepare all test combinations for parallel execution"""
+        
+        if test_all:
+            # Auto-detect all available data
+            available_data = self.get_all_available_data_files()
+            if not available_data:
+                return []
+            
+            pairs = list(set([item['pair'] for item in available_data]))
+            timeframes = list(set([item['timeframe'] for item in available_data]))
+        else:
+            if pairs is None:
+                pairs = ['EURUSD']
+            if timeframes is None:
+                timeframes = ['3D']
+        
+        if strategies is None:
+            strategies = list(self.MANAGEMENT_STRATEGIES.keys())
+        
+        # Create all combinations
+        test_combinations = []
+        for pair in pairs:
+            for timeframe in timeframes:
+                for strategy in strategies:
+                    test_combinations.append({
+                        'pair': pair,
+                        'timeframe': timeframe,
+                        'strategy': strategy,
+                        'days_back': days_back
+                    })
+        
+        return test_combinations
+    
+    def _run_parallel_tests(self, test_combinations: List[Dict]) -> List[Dict]:
+        """Execute tests in parallel using ProcessPoolExecutor"""
+        
+        print(f"\n🔄 Starting parallel execution with {self.max_workers} workers...")
+        start_time = time.time()
+        results = []
+        
+        with ProcessPoolExecutor(max_workers=self.max_workers) as executor:
+            # Submit all jobs
+            future_to_test = {
+                executor.submit(self._run_single_test_static, test_config): test_config 
+                for test_config in test_combinations
+            }
+            
+            # Collect results as they complete
+            completed = 0
+            total_tests = len(test_combinations)
+            
+            for future in as_completed(future_to_test):
+                test_config = future_to_test[future]
+                try:
+                    result = future.result()
+                    results.append(result)
+                    completed += 1
+                    
+                    # Progress tracking
+                    elapsed = time.time() - start_time
+                    rate = completed / elapsed if elapsed > 0 else 0
+                    eta = (total_tests - completed) / rate if rate > 0 else 0
+                    
+                    # Progress indicator
+                    progress_percent = (completed / total_tests) * 100
+                    print(f"🔄 Progress: {completed}/{total_tests} "
+                          f"({progress_percent:.1f}%) - "
+                          f"Rate: {rate:.1f}/sec - "
+                          f"ETA: {eta/60:.1f}min", end='\r')
+                    
+                except Exception as e:
+                    print(f"\n❌ Failed: {test_config['pair']} {test_config['timeframe']} "
+                          f"{test_config['strategy']}: {e}")
+                    # Add empty result for failed test
+                    results.append(self.empty_result(
+                        test_config['pair'], 
+                        test_config['timeframe'], 
+                        test_config['strategy'], 
+                        f"Error: {str(e)}"
+                    ))
+                    completed += 1
+        
+        total_time = time.time() - start_time
+        actual_speedup = (total_tests * 3.5) / total_time
+        
+        print(f"\n\n✅ Parallel execution complete!")
+        print(f"   Total time: {total_time/60:.1f} minutes")
+        print(f"   Tests per second: {total_tests/total_time:.1f}")
+        print(f"   Actual speedup: {actual_speedup:.1f}x")
+        print(f"   CPU utilization: ~{(actual_speedup/12)*100:.0f}%")
+        
+        return results
+    
+    @staticmethod
+    def _run_single_test_static(test_config: Dict) -> Dict:
+        """Static method for parallel execution (required for multiprocessing)"""
+        try:
+            # Create fresh backtester instance for each process
+            backtester = TradeManagementBacktester()
+            
+            return backtester.run_single_backtest(
+                test_config['pair'],
+                test_config['timeframe'], 
+                test_config['strategy'],
+                test_config['days_back']
+            )
+        except Exception as e:
+            # Return error result
+            return {
+                'pair': test_config['pair'],
+                'timeframe': test_config['timeframe'],
+                'strategy': test_config['strategy'],
+                'description': f"Error: {str(e)}",
+                'total_trades': 0,
+                'winning_trades': 0,
+                'profit_factor': 0,
+                'total_return': 0,
+                'error': str(e)
+            }
+
+
+def get_days_back_input() -> int:
+    """Enhanced days_back input with 'All Data' option"""
+    
+    print("\nSelect data period:")
+    print("1. Last 730 days (2 years)")
+    print("2. Last 1095 days (3 years)")
+    print("3. Last 1825 days (5 years)")
+    print("4. All available data (recommended for final analysis)")
+    print("5. Custom days")
+    
+    choice = input("\nEnter choice (1-5): ").strip()
+    
+    if choice == '1':
+        return 730
+    elif choice == '2':
+        return 1095
+    elif choice == '3':
+        return 1825
+    elif choice == '4':
+        print("   📊 Will use ALL available data for each pair")
+        print("   📈 XAUUSD 1D: ~14,552 candles")
+        print("   📈 Other pairs: ~2,000-9,999 candles")
+        return 99999  # Use large number to ensure all data
+    elif choice == '5':
+        days = int(input("Enter custom days: "))
+        return days
+    else:
+        print("Invalid choice, using default 730 days")
+        return 730
+
+def main_parallel():
+    """Main execution function with parallel processing"""
+    
+    print("🚀 PARALLEL TRADE MANAGEMENT BACKTESTING SYSTEM")
+    print("⚡ Optimized for Intel i5-10400F (6C/12T)")
     print("=" * 60)
     
-    backtester = TradeManagementBacktester()
+    backtester = ParallelTradeManagementBacktester(max_workers=10)
     
     print("\nSelect testing mode:")
-    print("1. Test single pair/timeframe/strategy combination")
-    print("2. Test specific pairs and timeframes with all strategies")
-    print("3. AUTO-TEST ALL AVAILABLE DATA (Recommended)")
-    print("4. Custom configuration")
+    print("1. Single test (no parallelization)")
+    print("2. Parallel: Specific pairs and timeframes")
+    print("3. Parallel: ALL AVAILABLE DATA (Recommended)")
+    print("4. Parallel: Custom configuration")
     
     choice = input("\nEnter choice (1-4): ").strip()
     
     if choice == '1':
-        # Single test
+        # Single test (original method)
         pair = input("Enter pair (e.g., EURUSD): ").strip().upper()
         timeframe = input("Enter timeframe (1D, 2D, 3D, 4D): ").strip()
-        
-        print("\nAvailable strategies:")
-        for i, strategy in enumerate(backtester.MANAGEMENT_STRATEGIES.keys(), 1):
-            desc = backtester.MANAGEMENT_STRATEGIES[strategy]['description']
-            print(f"   {i}. {strategy}: {desc}")
-        
         strategy_name = input("Enter strategy name: ").strip()
-        days_back = int(input("Enter days back (default 730): ") or 730)
+        days_back = get_days_back_input()
         
+        start_time = time.time()
         result = backtester.run_single_backtest(pair, timeframe, strategy_name, days_back)
-        print("\nResult:")
-        print(f"Trades: {result['total_trades']}, WR: {result['win_rate']}%, "
-                f"PF: {result['profit_factor']}, Return: {result['total_return']}%")
+        elapsed = time.time() - start_time
+        
+        print(f"\nSingle test completed in {elapsed:.1f} seconds")
+        print(f"Result: {result['total_trades']} trades, {result['win_rate']}% WR, "
+              f"PF: {result['profit_factor']}")
     
     elif choice == '2':
-        # Specific pairs/timeframes with all strategies
-        pairs = input("Enter pairs (comma-separated, e.g., EURUSD,GBPUSD): ").strip().upper().split(',')
-        timeframes = input("Enter timeframes (comma-separated, e.g., 1D,2D): ").strip().split(',')
-        days_back = int(input("Enter days back (default 730): ") or 730)
+        # Parallel: Specific pairs/timeframes
+        pairs = input("Enter pairs (comma-separated): ").strip().upper().split(',')
+        timeframes = input("Enter timeframes (comma-separated): ").strip().split(',')
+        days_back = get_days_back_input()
         
-        df = backtester.run_comprehensive_analysis(
+        df = backtester.run_parallel_comprehensive_analysis(
             test_all=False, pairs=pairs, timeframes=timeframes, days_back=days_back
         )
     
     elif choice == '3':
-        # Auto-test all available data
-        days_back = int(input("Enter days back (default 730): ") or 730)
+        # Parallel: All available data
+        days_back = get_days_back_input()
         
-        df = backtester.run_comprehensive_analysis(
+        df = backtester.run_parallel_comprehensive_analysis(
             test_all=True, days_back=days_back
         )
     
     elif choice == '4':
-        # Custom configuration
-        print("\nAvailable strategies:")
-        for i, strategy in enumerate(backtester.MANAGEMENT_STRATEGIES.keys(), 1):
-            desc = backtester.MANAGEMENT_STRATEGIES[strategy]['description']
-            print(f"   {i}. {strategy}: {desc}")
-        
-        strategy_input = input("\nEnter strategy names (comma-separated): ").strip()
-        strategies = [s.strip() for s in strategy_input.split(',')]
-        
+        # Parallel: Custom configuration
         pairs = input("Enter pairs (comma-separated): ").strip().upper().split(',')
         timeframes = input("Enter timeframes (comma-separated): ").strip().split(',')
-        days_back = int(input("Enter days back (default 730): ") or 730)
         
-        df = backtester.run_comprehensive_analysis(
+        print("\nSelect strategies (enter numbers, comma-separated):")
+        strategies_list = list(backtester.MANAGEMENT_STRATEGIES.keys())
+        for i, strategy in enumerate(strategies_list, 1):
+            print(f"   {i}. {strategy}")
+        
+        strategy_indices = input("\nStrategy numbers: ").strip().split(',')
+        strategies = [strategies_list[int(i)-1] for i in strategy_indices]
+        
+        days_back = get_days_back_input()
+        
+        df = backtester.run_parallel_comprehensive_analysis(
             test_all=False, pairs=pairs, timeframes=timeframes, 
             strategies=strategies, days_back=days_back
         )
     
-    else:
-        print("Invalid choice.")
-        return
-    
     print("\n✅ Analysis complete!")
 
 if __name__ == "__main__":
-    main()
+    main_parallel()
