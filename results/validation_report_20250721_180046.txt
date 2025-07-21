@@ -1,0 +1,6 @@
+BACKTESTING SYSTEMS VALIDATION REPORT
+==================================================
+Validation Date: 2025-07-21 18:00:46
+Test Instrument: EURUSD 3D
+Test Period: 730 days
+
