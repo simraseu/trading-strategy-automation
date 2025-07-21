@@ -10,6 +10,7 @@ import numpy as np
 import os
 import time
 import gc
+import glob
 from datetime import datetime
 from typing import Dict, List, Optional
 import multiprocessing as mp
@@ -466,10 +467,56 @@ class CompleteTradeManagementBacktester:
         print(f"   CPU cores: {mp.cpu_count()}")
         print(f"   System optimized for clean restart")
     
+    def get_all_available_data_files(self) -> List[Dict]:
+        """Auto-detect ALL available pairs and timeframes from your OANDA files"""
+        
+        data_path = self.data_loader.raw_path
+        print(f"🔍 Scanning: {data_path}")
+        
+        import glob
+        csv_files = glob.glob(os.path.join(data_path, "OANDA_*.csv"))
+        print(f"📁 Found {len(csv_files)} OANDA files")
+        
+        available_data = []
+        
+        for file_path in csv_files:
+            filename = os.path.basename(file_path)
+            
+            # Parse your format: OANDA_EURUSD, 1D_77888.csv
+            if ', ' in filename:
+                parts = filename.replace('OANDA_', '').replace('.csv', '').split(', ')
+                if len(parts) >= 2:
+                    pair = parts[0]  # EURUSD
+                    timeframe = parts[1].split('_')[0]  # 1D
+                    
+                    available_data.append({
+                        'pair': pair,
+                        'timeframe': timeframe,
+                        'filename': filename,
+                        'filepath': file_path
+                    })
+        
+        # Remove duplicates
+        unique_data = []
+        seen = set()
+        for item in available_data:
+            key = (item['pair'], item['timeframe'])
+            if key not in seen:
+                seen.add(key)
+                unique_data.append(item)
+        
+        unique_data.sort(key=lambda x: (x['pair'], x['timeframe']))
+        
+        print(f"✅ Detected {len(unique_data)} unique combinations:")
+        for item in unique_data:
+            print(f"   {item['pair']} {item['timeframe']}")
+        
+        return unique_data
+    
     def run_single_backtest(self, pair: str, timeframe: str, strategy_name: str, days_back: int = 730) -> Dict:
         """Run single strategy backtest with complete logic"""
         try:
-            # Load data
+            # Load data with support for ALL your timeframes
             if timeframe == '1D':
                 data = self.data_loader.load_pair_data(pair, 'Daily')
             elif timeframe == '2D':
@@ -478,19 +525,24 @@ class CompleteTradeManagementBacktester:
                 data = self.data_loader.load_pair_data(pair, '3Daily')
             elif timeframe == '4D':
                 data = self.data_loader.load_pair_data(pair, '4Daily')
+            elif timeframe == '5D':
+                data = self.data_loader.load_pair_data(pair, '5Daily')
             else:
                 data = self.data_loader.load_pair_data(pair, timeframe)
             
             if len(data) < 100:
                 return self.empty_result(pair, timeframe, strategy_name, "Insufficient data")
-            
-            # Limit data for memory efficiency
-            if days_back < 99999:
-                max_candles = min(days_back + 365, len(data))
+
+            # Only limit data if specifically requested with a reasonable limit
+            if days_back < 9999:  # ← Changed from 99999 to 9999
+                # For historical backtesting, use generous lookback
+                max_candles = min(days_back + 1000, len(data))
                 data = data.iloc[-max_candles:]
-            elif len(data) > 3000:  # Limit for clean system
-                data = data.iloc[-3000:]
-            
+                print(f"   📊 Using last {days_back} days + 1000 lookback ({len(data)} candles)")
+            elif days_back == 99999:  # ← Add this condition for "all data"
+                print(f"   📊 Using ALL available data ({len(data)} candles)")
+            # No else clause - use all data by default
+
             # Initialize components
             candle_classifier = CandleClassifier(data)
             classified_data = candle_classifier.classify_all_candles()
@@ -964,11 +1016,30 @@ class CompleteTradeManagementBacktester:
        print(f"💾 Current RAM usage: {memory_percent:.1f}%")
        print(f"🖥️  CPU cores: {mp.cpu_count()}")
        
-       # Set defaults
-       if pairs is None:
-           pairs = ['EURUSD']
-       if timeframes is None:
-           timeframes = ['3D']
+       # Auto-detect ALL available data if no parameters specified
+       if pairs is None and timeframes is None:
+           print("🔍 Auto-detecting ALL available data...")
+           available_data = self.get_all_available_data_files()
+           
+           if available_data:
+               pairs = sorted(list(set([item['pair'] for item in available_data])))
+               timeframes = sorted(list(set([item['timeframe'] for item in available_data])))
+               
+               print(f"📊 Auto-detected:")
+               print(f"   Pairs: {pairs}")
+               print(f"   Timeframes: {timeframes}")
+           else:
+               print("❌ No data detected, using defaults")
+               pairs = ['EURUSD']
+               timeframes = ['3D']
+       else:
+           # Set defaults
+           if pairs is None:
+               pairs = ['EURUSD']
+           if timeframes is None:
+               timeframes = ['3D']
+       
+       
        
        # Strategy selection by test mode
        if test_mode == "quick":
@@ -1139,9 +1210,10 @@ def main_complete():
     print("1. Quick test (4 strategies, ~1 minute)")
     print("2. Medium test (10 strategies, ~3 minutes)")  
     print("3. FULL ANALYSIS (All 55+ strategies, ~12-15 minutes)")
-    print("4. Custom test")
+    print("4. ALL DATA AUTO-TEST (Every pair/timeframe you have)")
+    print("5. Custom test")
     
-    choice = input("\nEnter choice (1-4): ").strip()
+    choice = input("\nEnter choice (1-5): ").strip()
 
     if choice == '1':
         print("\n🚀 Starting QUICK TEST...")
@@ -1164,6 +1236,19 @@ def main_complete():
             return
         
     elif choice == '4':
+        print("\n🚀 Starting ALL DATA AUTO-TEST...")
+        print("🔍 This will automatically detect and test EVERY pair and timeframe")
+        print("⚠️  This may take 30+ minutes depending on your data")
+        
+        confirm = input("Proceed with ALL data test? (y/n): ").strip().lower()
+        if confirm == 'y':
+            # Don't specify pairs/timeframes - let auto-detection handle it
+            df = backtester.run_complete_analysis(test_mode="medium")  # Use medium for speed
+        else:
+            print("Analysis cancelled.")
+            return
+            
+    elif choice == '5':
         print("\n🔧 Custom test configuration...")
         pairs = input("Enter pairs (comma-separated, default EURUSD): ").strip().upper().split(',') or ['EURUSD']
         timeframes = input("Enter timeframes (comma-separated, default 3D): ").strip().split(',') or ['3D']

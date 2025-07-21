@@ -27,6 +27,7 @@ class DataLoader:
             '2daily': ['2Daily', '2D'], 
             '3daily': ['3Daily', '3D'],
             '4daily': ['4Daily', '4D'],
+            '5daily': ['5Daily', '5D'],
             'weekly': ['Weekly', '1W'],
             'h12': ['H12', '12H'],
             'h4': ['H4', '4H']
