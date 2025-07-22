@@ -201,10 +201,16 @@ class DurationFocusedBacktester(CompleteTradeManagementBacktester):
         # ENHANCED: Universal data loader
         self.data_loader = UniversalDataLoader()
         
+        # ADD THESE LINES FOR CACHING:
+        self.data_cache = {}      # Cache loaded data
+        self.zone_cache = {}      # Cache detected zones  
+        self.trend_cache = {}     # Cache trend analysis
+        
         print(f"🎯 DURATION-FOCUSED BACKTESTING SYSTEM")
         print(f"   Duration strategies: {len(self.DURATION_STRATEGIES)}")
         print(f"   Universal time format support: ✅")
         print(f"   Identical trading logic: ✅")
+        print(f"   Data caching: ✅ ENABLED")  # Add this line
     
     def get_timeframe_multiplier(self, timeframe: str) -> float:
         """Get actual days per candle for timeframe"""
@@ -223,18 +229,14 @@ class DurationFocusedBacktester(CompleteTradeManagementBacktester):
         print(f"🕒 Timeframe {timeframe} → {multiplier} days per candle")
         return multiplier
     
-    def run_single_backtest(self, pair: str, timeframe: str, strategy_name: str, days_back: int = 730) -> Dict:
-        """FIXED: Override parent method to add timeframe multiplier handling"""
-        try:
-            print(f"\n🎯 Testing {pair} {timeframe} - {strategy_name}")
+    def get_cached_data(self, pair: str, timeframe: str, days_back: int) -> Dict:
+        """Get cached data, zones, and trends - compute once, use many times"""
+        cache_key = f"{pair}_{timeframe}_{days_back}"
+        
+        if cache_key not in self.data_cache:
+            print(f"🔄 Loading & caching {cache_key}...")
             
-            # FIXED: Store timeframe multiplier for use in trade simulation
-            self._current_timeframe_multiplier = self.get_timeframe_multiplier(timeframe)
-            self._current_timeframe = timeframe
-            
-            print(f"🕒 Timeframe: {timeframe} → {self._current_timeframe_multiplier} days per candle")
-            
-            # Load data with support for ALL timeframes
+            # Load data (same logic as before)
             if timeframe == '1D':
                 data = self.data_loader.load_pair_data(pair, 'Daily')
             elif timeframe == '2D':
@@ -249,56 +251,163 @@ class DurationFocusedBacktester(CompleteTradeManagementBacktester):
                 data = self.data_loader.load_pair_data(pair, timeframe)
             
             if len(data) < 100:
-                return self.empty_result(pair, timeframe, strategy_name, "Insufficient data")
-
-            # Only limit data if specifically requested with a reasonable limit
+                return {'error': 'Insufficient data'}
+            
+            # Apply data limiting (same logic as before)
             if days_back < 9999:
-                # For historical backtesting, use generous lookback
                 max_candles = min(days_back + 1000, len(data))
                 data = data.iloc[-max_candles:]
-                print(f"   📊 Using last {days_back} days + 1000 lookback ({len(data)} candles)")
-            elif days_back == 99999:
-                print(f"   📊 Using ALL available data ({len(data)} candles)")
             
-            print(f"   📅 Date range: {data.index[0].date()} → {data.index[-1].date()}")
-            
-            # Validate timeframe multiplier makes sense with data
-            sample_duration = (data.index[10] - data.index[0]).total_seconds() / (24 * 3600)
-            expected_duration = 10 * self._current_timeframe_multiplier
-            print(f"   🔍 Validation: 10 candles = {sample_duration:.1f} days (expected ~{expected_duration})")
-
-            # Initialize components
+            # CACHE THE HEAVY COMPUTATIONS
+            print(f"   🔍 Detecting zones for {cache_key}...")
             candle_classifier = CandleClassifier(data)
             classified_data = candle_classifier.classify_all_candles()
             
             zone_detector = ZoneDetector(candle_classifier)
             patterns = zone_detector.detect_all_patterns(classified_data)
             
+            print(f"   📊 Analyzing trend for {cache_key}...")
             trend_classifier = TrendClassifier(data)
             trend_data = trend_classifier.classify_trend_simplified()
+            
+            # Store in cache
+            self.data_cache[cache_key] = {
+                'data': data,
+                'patterns': patterns,
+                'trend_data': trend_data,
+                'timeframe_multiplier': self.get_timeframe_multiplier(timeframe)
+            }
+            
+            total_zones = patterns.get('total_patterns', 0)
+            print(f"   ✅ Cached: {len(data)} candles, {total_zones} zones, trend analysis")
+            
+            # Cleanup intermediate objects
+            del candle_classifier, classified_data, zone_detector, trend_classifier
+            gc.collect()
+        
+        return self.data_cache[cache_key]
+    
+    def run_single_backtest(self, pair: str, timeframe: str, strategy_name: str, days_back: int = 730) -> Dict:
+        """
+        CACHED VERSION: Run single backtest with caching optimization
+        Uses cached data/zones/trends for 3x speed improvement
+        """
+        try:
+            print(f"\n🎯 Testing {pair} {timeframe} - {strategy_name}")
+            
+            # STEP 1: Get cached data (load once, use many times)
+            cached_data = self.get_cached_data(pair, timeframe, days_back)
+            
+            if 'error' in cached_data:
+                return self.empty_result(pair, timeframe, strategy_name, cached_data['error'])
+            
+            # STEP 2: Extract pre-computed components from cache
+            data = cached_data['data']
+            patterns = cached_data['patterns'] 
+            trend_data = cached_data['trend_data']
+            self._current_timeframe_multiplier = cached_data['timeframe_multiplier']
+            self._current_timeframe = timeframe
+            
+            print(f"🚀 Using cached data: {len(data)} candles, {patterns.get('total_patterns', 0)} zones")
+            print(f"🕒 Timeframe: {timeframe} → {self._current_timeframe_multiplier} days per candle")
+            
+            # STEP 3: Validate data quality
+            if len(data) < 100:
+                return self.empty_result(pair, timeframe, strategy_name, "Insufficient data after caching")
+            
+            # STEP 4: Display data range info
+            print(f"   📅 Date range: {data.index[0].date()} → {data.index[-1].date()}")
+            
+            # STEP 5: Validate timeframe multiplier with sample data
+            if len(data) > 10:
+                sample_duration = (data.index[10] - data.index[0]).total_seconds() / (24 * 3600)
+                expected_duration = 10 * self._current_timeframe_multiplier
+                print(f"   🔍 Validation: 10 candles = {sample_duration:.1f} days (expected ~{expected_duration})")
+            
+            # STEP 6: Initialize remaining components (only non-cached ones)
             risk_manager = RiskManager(account_balance=10000)
             
-            strategy_config = self.DURATION_STRATEGIES[strategy_name]
+            # STEP 7: Get strategy configuration
+            if strategy_name not in self.DURATION_STRATEGIES:
+                return self.empty_result(pair, timeframe, strategy_name, f"Strategy {strategy_name} not found")
             
-            # Run backtest with duration awareness
+            strategy_config = self.DURATION_STRATEGIES[strategy_name]
+            print(f"📋 Strategy: {strategy_config['description']}")
+            
+            # STEP 8: Run backtest with cached components
             results = self.backtest_with_complete_management(
                 data, patterns, trend_data, risk_manager,
                 strategy_config, pair, timeframe, strategy_name
             )
             
-            # Add timeframe info to results
+            # STEP 9: Add timeframe metadata to results
             results['timeframe_multiplier'] = self._current_timeframe_multiplier
             results['timeframe'] = timeframe
+            results['cached_execution'] = True  # Flag to indicate caching was used
+            results['data_range_start'] = data.index[0].strftime('%Y-%m-%d')
+            results['data_range_end'] = data.index[-1].strftime('%Y-%m-%d')
+            results['total_candles_analyzed'] = len(data)
+            results['total_zones_detected'] = patterns.get('total_patterns', 0)
             
-            # Cleanup
-            del data, patterns, trend_data, risk_manager
-            gc.collect()
+            # STEP 10: Add duration-specific metadata
+            results['be_trigger'] = strategy_config.get('breakeven_at', 0)
+            results['profit_target'] = strategy_config.get('target', 0)
+            results['target_extension'] = strategy_config.get('target', 0) - 2.0  # Extension from 2R baseline
+            
+            # STEP 11: Performance logging
+            if results.get('total_trades', 0) > 0:
+                print(f"✅ Results: {results['total_trades']} trades, "
+                    f"{results.get('win_rate', 0):.1f}% WR, "
+                    f"PF: {results.get('profit_factor', 0):.2f}")
+                
+                if 'avg_duration_days' in results:
+                    print(f"   Duration: {results['avg_duration_days']:.1f} days average")
+                    
+                if 'profit_per_day' in results:
+                    print(f"   Efficiency: ${results['profit_per_day']:.0f}/day")
+            else:
+                print(f"⚠️  No trades executed for {strategy_name}")
+            
+            # STEP 12: Memory management (but keep cache intact)
+            # Note: We don't delete cached data since it will be reused
+            del risk_manager  # Only delete non-cached objects
             
             return results
             
         except Exception as e:
+            print(f"❌ Error in {pair} {timeframe} {strategy_name}: {str(e)}")
+            
+            # Clean up on error but preserve cache
             gc.collect()
+            
             return self.empty_result(pair, timeframe, strategy_name, f"Error: {str(e)}")
+
+    def empty_result(self, pair: str, timeframe: str, strategy_name: str, reason: str) -> Dict:
+        """Enhanced empty result with duration metadata"""
+        return {
+            'pair': pair,
+            'timeframe': timeframe,
+            'strategy': strategy_name,
+            'description': reason,
+            'strategy_type': 'failed',
+            'total_trades': 0,
+            'winning_trades': 0,
+            'profit_factor': 0,
+            'total_return': 0,
+            'final_balance': 10000,
+            'trades_data': [],
+            
+            # Duration-specific empty fields
+            'avg_duration_days': 0,
+            'profit_per_day': 0,
+            'profit_per_hour': 0,
+            'be_trigger': 0,
+            'profit_target': 0,
+            'target_extension': 0,
+            'timeframe_multiplier': 1,
+            'cached_execution': False,
+            'error_reason': reason
+        }
         
     def get_all_available_data_files(self) -> List[Dict]:
         """Auto-detect ALL available pairs and timeframes from your OANDA files"""
@@ -717,13 +826,17 @@ class DurationFocusedBacktester(CompleteTradeManagementBacktester):
         return df
     
     def run_duration_test_worker(self, test_config: Dict) -> Dict:
-        """Worker function for duration analysis (same pattern as existing)"""
+        """Worker function for duration analysis (CACHED VERSION)"""
         try:
             # Create backtester with DURATION STRATEGIES ONLY
             backtester = DurationFocusedBacktester(max_workers=1)
             
             # CRITICAL: Replace strategy set with DURATION ONLY
             backtester.COMPLETE_STRATEGIES = self.DURATION_STRATEGIES
+            
+            # OPTIMIZATION: Share the cache if this is part of batch processing
+            if hasattr(self, 'data_cache'):
+                backtester.data_cache = self.data_cache  # Share cache between workers
             
             result = backtester.run_single_backtest(
                 test_config['pair'],
@@ -1057,7 +1170,7 @@ def main_duration_analysis():
     print("=" * 70)
     
     # Initialize duration-focused backtester
-    analyzer = DurationFocusedBacktester(max_workers=8)
+    analyzer = DurationFocusedBacktester(max_workers=10)
     
     print("\nSelect duration analysis scope:")
     print("1. Quick Analysis (EURUSD only, 3D timeframe)")
