@@ -205,6 +205,146 @@ class DurationFocusedBacktester(CompleteTradeManagementBacktester):
         print(f"   Duration strategies: {len(self.DURATION_STRATEGIES)}")
         print(f"   Universal time format support: ✅")
         print(f"   Identical trading logic: ✅")
+    
+    def get_timeframe_multiplier(self, timeframe: str) -> float:
+        """Get actual days per candle for timeframe"""
+        TIMEFRAME_MULTIPLIERS = {
+            '1D': 1, 'Daily': 1,
+            '2D': 2, '2Daily': 2, 
+            '3D': 3, '3Daily': 3,
+            '4D': 4, '4Daily': 4,
+            '5D': 5, '5Daily': 5,
+            'H4': 0.167,   # 4 hours = 1/6 day
+            'H12': 0.5,    # 12 hours = 1/2 day
+            'Weekly': 7, '1W': 7
+        }
+        
+        multiplier = TIMEFRAME_MULTIPLIERS.get(timeframe, 1)
+        print(f"🕒 Timeframe {timeframe} → {multiplier} days per candle")
+        return multiplier
+    
+    def run_single_backtest(self, pair: str, timeframe: str, strategy_name: str, days_back: int = 730) -> Dict:
+        """FIXED: Override parent method to add timeframe multiplier handling"""
+        try:
+            print(f"\n🎯 Testing {pair} {timeframe} - {strategy_name}")
+            
+            # FIXED: Store timeframe multiplier for use in trade simulation
+            self._current_timeframe_multiplier = self.get_timeframe_multiplier(timeframe)
+            self._current_timeframe = timeframe
+            
+            print(f"🕒 Timeframe: {timeframe} → {self._current_timeframe_multiplier} days per candle")
+            
+            # Load data with support for ALL timeframes
+            if timeframe == '1D':
+                data = self.data_loader.load_pair_data(pair, 'Daily')
+            elif timeframe == '2D':
+                data = self.data_loader.load_pair_data(pair, '2Daily')
+            elif timeframe == '3D':
+                data = self.data_loader.load_pair_data(pair, '3Daily')
+            elif timeframe == '4D':
+                data = self.data_loader.load_pair_data(pair, '4Daily')
+            elif timeframe == '5D':
+                data = self.data_loader.load_pair_data(pair, '5Daily')
+            else:
+                data = self.data_loader.load_pair_data(pair, timeframe)
+            
+            if len(data) < 100:
+                return self.empty_result(pair, timeframe, strategy_name, "Insufficient data")
+
+            # Only limit data if specifically requested with a reasonable limit
+            if days_back < 9999:
+                # For historical backtesting, use generous lookback
+                max_candles = min(days_back + 1000, len(data))
+                data = data.iloc[-max_candles:]
+                print(f"   📊 Using last {days_back} days + 1000 lookback ({len(data)} candles)")
+            elif days_back == 99999:
+                print(f"   📊 Using ALL available data ({len(data)} candles)")
+            
+            print(f"   📅 Date range: {data.index[0].date()} → {data.index[-1].date()}")
+            
+            # Validate timeframe multiplier makes sense with data
+            sample_duration = (data.index[10] - data.index[0]).total_seconds() / (24 * 3600)
+            expected_duration = 10 * self._current_timeframe_multiplier
+            print(f"   🔍 Validation: 10 candles = {sample_duration:.1f} days (expected ~{expected_duration})")
+
+            # Initialize components
+            candle_classifier = CandleClassifier(data)
+            classified_data = candle_classifier.classify_all_candles()
+            
+            zone_detector = ZoneDetector(candle_classifier)
+            patterns = zone_detector.detect_all_patterns(classified_data)
+            
+            trend_classifier = TrendClassifier(data)
+            trend_data = trend_classifier.classify_trend_simplified()
+            risk_manager = RiskManager(account_balance=10000)
+            
+            strategy_config = self.DURATION_STRATEGIES[strategy_name]
+            
+            # Run backtest with duration awareness
+            results = self.backtest_with_complete_management(
+                data, patterns, trend_data, risk_manager,
+                strategy_config, pair, timeframe, strategy_name
+            )
+            
+            # Add timeframe info to results
+            results['timeframe_multiplier'] = self._current_timeframe_multiplier
+            results['timeframe'] = timeframe
+            
+            # Cleanup
+            del data, patterns, trend_data, risk_manager
+            gc.collect()
+            
+            return results
+            
+        except Exception as e:
+            gc.collect()
+            return self.empty_result(pair, timeframe, strategy_name, f"Error: {str(e)}")
+        
+    def get_all_available_data_files(self) -> List[Dict]:
+        """Auto-detect ALL available pairs and timeframes from your OANDA files"""
+        
+        data_path = self.data_loader.raw_path
+        print(f"🔍 Scanning: {data_path}")
+        
+        import glob
+        csv_files = glob.glob(os.path.join(data_path, "OANDA_*.csv"))
+        print(f"📁 Found {len(csv_files)} OANDA files")
+        
+        available_data = []
+        
+        for file_path in csv_files:
+            filename = os.path.basename(file_path)
+            
+            # Parse your format: OANDA_EURUSD, 1D_77888.csv
+            if ', ' in filename:
+                parts = filename.replace('OANDA_', '').replace('.csv', '').split(', ')
+                if len(parts) >= 2:
+                    pair = parts[0]  # EURUSD
+                    timeframe = parts[1].split('_')[0]  # 1D
+                    
+                    available_data.append({
+                        'pair': pair,
+                        'timeframe': timeframe,
+                        'filename': filename,
+                        'filepath': file_path
+                    })
+        
+        # Remove duplicates
+        unique_data = []
+        seen = set()
+        for item in available_data:
+            key = (item['pair'], item['timeframe'])
+            if key not in seen:
+                seen.add(key)
+                unique_data.append(item)
+        
+        unique_data.sort(key=lambda x: (x['pair'], x['timeframe']))
+        
+        print(f"✅ Detected {len(unique_data)} unique combinations:")
+        for item in unique_data:
+            print(f"   {item['pair']} {item['timeframe']}")
+        
+        return unique_data
         
     # IDENTICAL: Same trading logic (inherited from parent)
     def backtest_with_complete_management(self, data: pd.DataFrame, patterns: Dict,
@@ -220,32 +360,50 @@ class DurationFocusedBacktester(CompleteTradeManagementBacktester):
             strategy_config, pair, timeframe, strategy_name
         )
     
-    # ENHANCED: Duration-focused trade result creation
     def create_duration_focused_trade_result(self, entry_idx: int, data: pd.DataFrame,
-                                           entry_price: float, exit_price: float, direction: str,
-                                           total_pnl: float, exit_reason: str, days_held: int,
-                                           strategy_config: Dict, partial_exits: List[Dict],
-                                           remaining_position: float) -> Dict:
-        """Enhanced trade result with comprehensive duration analysis"""
+                                       entry_price: float, exit_price: float, direction: str,
+                                       total_pnl: float, exit_reason: str, precise_days_held: float,
+                                       strategy_config: Dict, partial_exits: List[Dict],
+                                       remaining_position: float, timeframe_multiplier: float = 1) -> Dict:
+        """FIXED: Enhanced trade result with proper duration calculation"""
         
         # Calculate precise duration using datetime index
         entry_date = data.index[entry_idx]
-        exit_date = data.index[min(entry_idx + days_held, len(data) - 1)]
         
-        # Duration calculations
+        # Calculate exit index from precise days
+        candles_held = int(precise_days_held / timeframe_multiplier)
+        exit_idx = min(entry_idx + candles_held, len(data) - 1)
+        exit_date = data.index[exit_idx]
+        
+        # FIXED: Use datetime for most precise calculation
         duration_timedelta = exit_date - entry_date
-        duration_days = duration_timedelta.total_seconds() / (24 * 3600)  # Precise decimal days
+        datetime_days_held = duration_timedelta.total_seconds() / (24 * 3600)
         duration_hours = duration_timedelta.total_seconds() / 3600
+        
+        # VALIDATION: Compare methods and use most accurate
+        candle_based_days = candles_held * timeframe_multiplier
+        
+        print(f"🔍 Duration Validation:")
+        print(f"   Candles held: {candles_held}")
+        print(f"   Timeframe: ×{timeframe_multiplier} days/candle")
+        print(f"   Candle-based: {candle_based_days:.1f} days")
+        print(f"   DateTime-based: {datetime_days_held:.1f} days")
+        print(f"   Precise input: {precise_days_held:.1f} days")
+        print(f"   Entry: {entry_date.date()} → Exit: {exit_date.date()}")
+        
+        # Use precise_days_held as primary (passed from simulation)
+        final_days_held = precise_days_held
         
         # Weekend exposure calculation
         weekend_days = self._count_weekend_exposure(entry_date, exit_date)
         
-        # Duration efficiency metrics
-        profit_per_day = total_pnl / max(duration_days, 0.1) if duration_days > 0 else 0
+        # FIXED: Duration efficiency metrics
+        profit_per_day = total_pnl / max(final_days_held, 0.1) if final_days_held > 0 else 0
         profit_per_hour = total_pnl / max(duration_hours, 1) if duration_hours > 0 else 0
+        profit_per_trading_day = total_pnl / max(1, final_days_held - weekend_days) if final_days_held > weekend_days else profit_per_day
         
         return {
-            # IDENTICAL: Standard trade fields (same as your existing)
+            # IDENTICAL: Standard trade fields (same as existing)
             'entry_date': entry_date,
             'exit_date': exit_date,
             'entry_price': entry_price,
@@ -261,18 +419,20 @@ class DurationFocusedBacktester(CompleteTradeManagementBacktester):
             'partial_exit_pnl': sum(pe['pnl'] for pe in partial_exits),
             'remainder_pnl': total_pnl - sum(pe['pnl'] for pe in partial_exits),
             
-            # ENHANCED: Duration analysis fields
-            'days_held': days_held,
-            'precise_days_held': round(duration_days, 2),
+            # FIXED: Duration analysis fields
+            'days_held': int(final_days_held),  # For compatibility
+            'precise_days_held': round(final_days_held, 2),
             'hours_held': round(duration_hours, 1),
-            'duration_category': self._categorize_duration(duration_days),
+            'candles_held': candles_held,
+            'timeframe_multiplier': timeframe_multiplier,
+            'duration_category': self._categorize_duration(final_days_held),
             'weekend_exposure': weekend_days,
-            'trading_days_held': max(1, days_held - weekend_days),  # Exclude weekends
+            'trading_days_held': max(1, final_days_held - weekend_days),
             
-            # ENHANCED: Duration efficiency metrics
+            # FIXED: Duration efficiency metrics
             'profit_per_day': round(profit_per_day, 2),
             'profit_per_hour': round(profit_per_hour, 2),
-            'profit_per_trading_day': round(total_pnl / max(1, days_held - weekend_days), 2),
+            'profit_per_trading_day': round(profit_per_trading_day, 2),
             
             # ENHANCED: Strategy context for analysis
             'be_trigger': strategy_config.get('breakeven_at', 0),
@@ -306,32 +466,185 @@ class DurationFocusedBacktester(CompleteTradeManagementBacktester):
         
         return weekend_days
     
-    # ENHANCED: Override trade simulation to use enhanced result creation
     def simulate_complete_trade(self, zone: Dict, entry_price: float,
-                               initial_stop: float, entry_idx: int,
-                               data: pd.DataFrame, strategy_config: Dict,
-                               direction: str, position_size: float,
-                               risk_amount: float) -> Dict:
-        """
-        IDENTICAL trade simulation logic with enhanced result creation
-        """
-        # Use parent's simulation logic (IDENTICAL trading behavior)
-        result = super().simulate_complete_trade(
-            zone, entry_price, initial_stop, entry_idx, data,
-            strategy_config, direction, position_size, risk_amount
+                           initial_stop: float, entry_idx: int,
+                           data: pd.DataFrame, strategy_config: Dict,
+                           direction: str, position_size: float,
+                           risk_amount: float) -> Dict:
+        """FIXED: Complete trade simulation with proper duration calculation"""
+        
+        remaining_position = 1.0
+        total_pnl = 0.0
+        current_stop = initial_stop
+        risk_distance = abs(entry_price - initial_stop)
+        
+        partial_exits_executed = []
+        breakeven_moved = False
+        trailing_active = False
+        
+        strategy_type = strategy_config['type']
+
+        # Limit simulation length for memory efficiency
+        max_simulation_length = min(500, len(data) - entry_idx - 1)
+        
+        # Get timeframe multiplier for proper duration calculation
+        timeframe_multiplier = getattr(self, '_current_timeframe_multiplier', 1)
+        
+        for i in range(entry_idx + 1, entry_idx + 1 + max_simulation_length):
+            if i >= len(data):
+                break
+                
+            candle = data.iloc[i]
+            current_date = data.index[i]
+            
+            # FIXED: Calculate actual duration properly
+            candles_held = i - entry_idx
+            actual_days_held = candles_held * timeframe_multiplier
+            
+            # Calculate precise duration using datetime
+            entry_date = data.index[entry_idx]
+            precise_days_held = (current_date - entry_date).total_seconds() / (24 * 3600)
+            
+            # DEBUG: Show duration calculation for first few iterations
+            if candles_held <= 3:
+                print(f"   🕒 Debug Day {candles_held}: TF×{timeframe_multiplier} = {actual_days_held} days, "
+                    f"DateTime = {precise_days_held:.1f} days")
+            
+            current_price = candle['close']
+            
+            # Calculate R:R efficiently
+            if direction == 'BUY':
+                current_rr = (current_price - entry_price) / risk_distance
+            else:
+                current_rr = (entry_price - current_price) / risk_distance
+            
+            # Process partial exits
+            if strategy_type in ['partial_trail', 'partial_breakeven'] and 'partial_exits' in strategy_config:
+                for exit_config in strategy_config['partial_exits']:
+                    exit_level = exit_config['at_level']
+                    exit_percentage = exit_config['percentage'] / 100.0
+                    
+                    exit_key = f"{exit_level}R"
+                    already_executed = any(pe['level'] == exit_key for pe in partial_exits_executed)
+                    
+                    if not already_executed and current_rr >= exit_level:
+                        exit_amount = remaining_position * exit_percentage
+                        remaining_position -= exit_amount
+                        
+                        if direction == 'BUY':
+                            exit_price = entry_price + (risk_distance * exit_level)
+                            partial_pnl = (exit_price - entry_price) * position_size * exit_amount
+                        else:
+                            exit_price = entry_price - (risk_distance * exit_level)
+                            partial_pnl = (entry_price - exit_price) * position_size * exit_amount
+                        
+                        total_pnl += partial_pnl
+                        
+                        partial_exits_executed.append({
+                            'level': exit_key,
+                            'percentage': exit_percentage * 100,
+                            'amount': exit_amount,
+                            'pnl': partial_pnl,
+                            'date': current_date,
+                            'exit_price': exit_price
+                        })
+            
+            # Check stop loss
+            if direction == 'BUY' and candle['low'] <= current_stop:
+                final_pnl = (current_stop - entry_price) * position_size * remaining_position
+                total_pnl += final_pnl
+                
+                return self.create_duration_focused_trade_result(
+                    entry_idx, data, entry_price, current_stop, direction,
+                    total_pnl, 'stop_loss', precise_days_held, strategy_config,
+                    partial_exits_executed, remaining_position, timeframe_multiplier
+                )
+            
+            elif direction == 'SELL' and candle['high'] >= current_stop:
+                final_pnl = (entry_price - current_stop) * position_size * remaining_position
+                total_pnl += final_pnl
+                
+                return self.create_duration_focused_trade_result(
+                    entry_idx, data, entry_price, current_stop, direction,
+                    total_pnl, 'stop_loss', precise_days_held, strategy_config,
+                    partial_exits_executed, remaining_position, timeframe_multiplier
+                )
+            
+            # Break-even management
+            if not breakeven_moved:
+                if strategy_type == 'profit_breakeven' and 'breakeven_trigger' in strategy_config:
+                    be_trigger = strategy_config['breakeven_trigger']
+                    if current_rr >= be_trigger:
+                        profit_level = strategy_config.get('profit_be_level', 0.5)
+                        if direction == 'BUY':
+                            current_stop = entry_price + (risk_distance * profit_level)
+                        else:
+                            current_stop = entry_price - (risk_distance * profit_level)
+                        breakeven_moved = True
+                
+                elif 'breakeven_at' in strategy_config and strategy_config['breakeven_at']:
+                    be_level = strategy_config['breakeven_at']
+                    if current_rr >= be_level:
+                        current_stop = entry_price
+                        breakeven_moved = True
+            
+            # Zone trailing logic (simplified for stability)
+            if strategy_type in ['partial_trail', 'zone_trailing'] and 'trail_activation' in strategy_config:
+                trail_activation = strategy_config.get('trail_activation', 1.0)
+                
+                if not trailing_active and current_rr >= trail_activation:
+                    trailing_active = True
+                
+                if trailing_active:
+                    # Simplified trailing based on recent lows/highs
+                    lookback = min(10, i - entry_idx)
+                    if lookback > 0:
+                        recent_data = data.iloc[i-lookback:i+1]
+                        
+                        if direction == 'BUY':
+                            recent_low = recent_data['low'].min()
+                            trail_stop = recent_low - (recent_data['high'].max() - recent_data['low'].min()) * 0.33
+                            if trail_stop > current_stop:
+                                current_stop = trail_stop
+                        else:
+                            recent_high = recent_data['high'].max()
+                            trail_stop = recent_high + (recent_data['high'].max() - recent_data['low'].min()) * 0.33
+                            if trail_stop < current_stop:
+                                current_stop = trail_stop
+            
+            # Target check
+            if 'target' in strategy_config and strategy_config['target']:
+                target_level = strategy_config['target']
+                if current_rr >= target_level:
+                    if direction == 'BUY':
+                        target_price = entry_price + (risk_distance * target_level)
+                    else:
+                        target_price = entry_price - (risk_distance * target_level)
+                    
+                    final_pnl = (target_price - entry_price) * position_size * remaining_position if direction == 'BUY' else (entry_price - target_price) * position_size * remaining_position
+                    total_pnl += final_pnl
+                    
+                    return self.create_duration_focused_trade_result(
+                        entry_idx, data, entry_price, target_price, direction,
+                        total_pnl, 'take_profit', precise_days_held, strategy_config,
+                        partial_exits_executed, remaining_position, timeframe_multiplier
+                    )
+        
+        # End of data
+        final_price = data.iloc[min(entry_idx + max_simulation_length, len(data) - 1)]['close']
+        final_pnl = (final_price - entry_price) * position_size * remaining_position if direction == 'BUY' else (entry_price - final_price) * position_size * remaining_position
+        total_pnl += final_pnl
+        
+        # Use precise datetime calculation for end of data
+        final_date = data.index[min(entry_idx + max_simulation_length, len(data) - 1)]
+        entry_date = data.index[entry_idx]
+        final_precise_days = (final_date - entry_date).total_seconds() / (24 * 3600)
+        
+        return self.create_duration_focused_trade_result(
+            entry_idx, data, entry_price, final_price, direction,
+            total_pnl, 'end_of_data', final_precise_days, strategy_config,
+            partial_exits_executed, remaining_position, timeframe_multiplier
         )
-        
-        # ENHANCED: Replace result creation with duration-focused version
-        if result:
-            enhanced_result = self.create_duration_focused_trade_result(
-                entry_idx, data, result['entry_price'], result['exit_price'],
-                result['direction'], result['total_pnl'], result['exit_reason'],
-                result['days_held'], strategy_config, result['partial_exits'],
-                result['remaining_position_pct'] / 100
-            )
-            return enhanced_result
-        
-        return result
     
     
     def run_duration_analysis(self, pairs: List[str] = None, 
