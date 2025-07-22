@@ -168,21 +168,14 @@ class BreakEvenAnalysisEngine:
         print("=" * 60)
         print(f"📊 Break-even strategies to analyze: {len(self.BREAKEVEN_STRATEGIES)}")
         print("🎲 Triple-rate focus: Win/Break-Even/Loss breakdown")
-        print("💱 Forex pairs only (excluding XAU, SPX, WTI)")
         
     def get_forex_pairs_only(self) -> List[str]:
         """Get only forex pairs from available data"""
         backtester = CompleteTradeManagementBacktester()
         available_data = backtester.get_all_available_data_files()
         
-        # Filter to forex pairs only (exclude commodities and indices)
-        forex_pairs = []
-        excluded = ['XAU', 'SPX', 'WTI', 'GOLD', 'OIL', 'NAS', 'US30']
-        
-        for item in available_data:
-            pair = item['pair']
-            if not any(excl in pair for excl in excluded):
-                forex_pairs.append(pair)
+        # Get all pairs without exclusion
+        forex_pairs = [item['pair'] for item in available_data]
         
         # Remove duplicates and sort
         forex_pairs = sorted(list(set(forex_pairs)))
@@ -204,9 +197,10 @@ class BreakEvenAnalysisEngine:
         
         # Auto-detect forex pairs if not specified
         if pairs is None:
-            pairs = self.get_forex_pairs_only()[:3]  # Limit to top 3 for initial analysis
+            pairs = self.get_forex_pairs_only()  # <- get all pairs, no slicing
             print(f"📊 Auto-selected pairs: {pairs}")
-        
+
+
         if timeframes is None:
             timeframes = ['3D']  # Optimal timeframe from your testing
             print(f"⏰ Using timeframe: {timeframes}")
@@ -664,7 +658,6 @@ def main_breakeven_analysis():
    
    print("🎯 COMPREHENSIVE BREAK-EVEN STRATEGY ANALYSIS")
    print("🎲 Triple-Rate Focus: Win/Break-Even/Loss Breakdown")
-   print("💱 Forex Pairs Only (Excluding Commodities)")
    print("=" * 70)
    
    # Initialize analysis engine
