@@ -100,6 +100,148 @@ class CleanZoneAgeConditionBacktester:
             'description': 'Fresh zones + favorable conditions'
         }
     }
+
+    def generate_complete_complete_report(self, df: pd.DataFrame, all_pairs: List[str], all_timeframes: List[str]):
+        """Generate comprehensive report for complete analysis"""
+        
+        print(f"\n📊 COMPLETE COMPLETE ANALYSIS REPORT")
+        print("🌍 Every Pair × Every Timeframe × Every Strategy")
+        print("=" * 80)
+        
+        successful_df = df[df['total_trades'] > 0].copy()
+        
+        if len(successful_df) == 0:
+            print("❌ No successful strategies found across all tests")
+            self.save_complete_results_emergency(df)
+            return
+        
+        print(f"✅ SUCCESS SUMMARY:")
+        print(f"   Total tests: {len(df):,}")
+        print(f"   Successful strategies: {len(successful_df):,}")
+        print(f"   Success rate: {len(successful_df)/len(df)*100:.1f}%")
+        print(f"   Pairs tested: {len(all_pairs)}")
+        print(f"   Timeframes tested: {len(all_timeframes)}")
+        
+        # TOP PERFORMERS
+        print(f"\n🏆 TOP 10 PERFORMERS (All Pairs/Timeframes):")
+        top_10 = successful_df.nlargest(10, 'profit_factor')
+        for i, (_, row) in enumerate(top_10.iterrows(), 1):
+            print(f"   {i:2d}. {row['pair']} {row['timeframe']} {row['strategy']}: "
+                f"PF {row['profit_factor']:.2f}, WR {row['win_rate']:.1f}%, "
+                f"{row['total_trades']} trades")
+        
+        # PAIR ANALYSIS
+        print(f"\n💱 BEST PERFORMING PAIRS:")
+        pair_performance = successful_df.groupby('pair').agg({
+            'profit_factor': 'mean',
+            'win_rate': 'mean',
+            'total_trades': 'sum',
+            'strategy': 'count'
+        }).round(2)
+        pair_performance = pair_performance.sort_values('profit_factor', ascending=False)
+        
+        for pair in pair_performance.head(5).index:
+            row = pair_performance.loc[pair]
+            print(f"   {pair}: Avg PF {row['profit_factor']:.2f}, "
+                f"WR {row['win_rate']:.1f}%, {row['strategy']} successful strategies")
+        
+        # TIMEFRAME ANALYSIS
+        print(f"\n⏰ BEST PERFORMING TIMEFRAMES:")
+        tf_performance = successful_df.groupby('timeframe').agg({
+            'profit_factor': 'mean',
+            'win_rate': 'mean',
+            'total_trades': 'sum',
+            'strategy': 'count'
+        }).round(2)
+        tf_performance = tf_performance.sort_values('profit_factor', ascending=False)
+        
+        for tf in tf_performance.head(5).index:
+            row = tf_performance.loc[tf]
+            print(f"   {tf}: Avg PF {row['profit_factor']:.2f}, "
+                f"WR {row['win_rate']:.1f}%, {row['strategy']} successful strategies")
+        
+        # STRATEGY ANALYSIS
+        print(f"\n🎯 STRATEGY EFFECTIVENESS:")
+        strategy_performance = successful_df.groupby('strategy').agg({
+            'profit_factor': ['mean', 'count'],
+            'win_rate': 'mean',
+            'total_return': 'mean'
+        }).round(2)
+        
+        for strategy in strategy_performance.index:
+            pf_mean = strategy_performance.loc[strategy, ('profit_factor', 'mean')]
+            count = strategy_performance.loc[strategy, ('profit_factor', 'count')]
+            wr_mean = strategy_performance.loc[strategy, ('win_rate', 'mean')]
+            
+            print(f"   {strategy}: PF {pf_mean:.2f}, WR {wr_mean:.1f}% "
+                f"({count} successful implementations)")
+        
+        # SAVE COMPREHENSIVE RESULTS
+        self.save_complete_results_emergency(df)
+        
+        print(f"\n🎯 KEY INSIGHTS:")
+        best_overall = successful_df.loc[successful_df['profit_factor'].idxmax()]
+        print(f"   🥇 Best overall: {best_overall['pair']} {best_overall['timeframe']} "
+            f"{best_overall['strategy']} (PF: {best_overall['profit_factor']:.2f})")
+        
+        most_consistent = successful_df.groupby('strategy')['profit_factor'].count().idxmax()
+        consistency_count = successful_df.groupby('strategy')['profit_factor'].count().max()
+        print(f"   🎯 Most consistent: {most_consistent} "
+            f"({consistency_count} successful implementations)")
+        
+        print(f"\n✅ COMPLETE ANALYSIS FINISHED!")
+        print(f"📁 All results saved to Excel with comprehensive breakdowns")
+
+    def save_complete_results_emergency(self, df: pd.DataFrame):
+        """Emergency save of complete results"""
+        
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"results/COMPLETE_ANALYSIS_{timestamp}.xlsx"
+        os.makedirs('results', exist_ok=True)
+        
+        print(f"\n💾 EMERGENCY SAVE: Saving {len(df):,} results...")
+        
+        with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+            
+            # Sheet 1: All Results
+            df.to_excel(writer, sheet_name='All_Results', index=False)
+            
+            # Sheet 2: Successful Only
+            successful_df = df[df['total_trades'] > 0]
+            if len(successful_df) > 0:
+                successful_df.to_excel(writer, sheet_name='Successful_Only', index=False)
+                
+                # Sheet 3: Top 50 Performers
+                top_50 = successful_df.nlargest(50, 'profit_factor')
+                top_50.to_excel(writer, sheet_name='Top_50_Performers', index=False)
+                
+                # Sheet 4: Pair Summary
+                pair_summary = successful_df.groupby('pair').agg({
+                    'profit_factor': ['mean', 'max', 'count'],
+                    'win_rate': 'mean',
+                    'total_trades': 'sum'
+                }).round(2)
+                pair_summary.to_excel(writer, sheet_name='Pair_Summary')
+                
+                # Sheet 5: Timeframe Summary
+                tf_summary = successful_df.groupby('timeframe').agg({
+                    'profit_factor': ['mean', 'max', 'count'],
+                    'win_rate': 'mean',
+                    'total_trades': 'sum'
+                }).round(2)
+                tf_summary.to_excel(writer, sheet_name='Timeframe_Summary')
+                
+                # Sheet 6: Strategy Summary
+                strategy_summary = successful_df.groupby('strategy').agg({
+                    'profit_factor': ['mean', 'max', 'count'],
+                    'win_rate': 'mean',
+                    'total_return': 'mean'
+                }).round(2)
+                strategy_summary.to_excel(writer, sheet_name='Strategy_Summary')
+        
+        print(f"✅ EMERGENCY SAVE COMPLETE: {filename}")
+        print(f"📊 Saved {len(df):,} total results with comprehensive analysis")
+        return filename
     
     def __init__(self, max_workers: int = None):
         self.data_loader = DataLoader()
