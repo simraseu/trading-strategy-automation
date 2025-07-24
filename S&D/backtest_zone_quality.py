@@ -28,6 +28,37 @@ from modules.zone_detector import ZoneDetector
 from modules.trend_classifier import TrendClassifier
 from modules.risk_manager import RiskManager
 
+# UPDATED BACKTESTING FRAMEWORK - MODULE 6
+ANALYSIS_PERIODS = {
+    'priority_1': {
+        'name': '2015-2025 (10 years) - PRIMARY ANALYSIS',
+        'days_back': 3847,
+        'description': 'Modern market structure validation'
+    },
+    'priority_2': {
+        'name': '2020-2025 (4 years) - RECENT VALIDATION', 
+        'days_back': 2021,
+        'description': 'Post-COVID market performance'
+    },
+    'priority_3': {
+        'name': '2018-2025 (6 years) - MEDIUM-TERM VIEW',
+        'days_back': 2751,
+        'description': 'Mid-term consistency check'
+    },
+    'priority_4': {
+        'name': '2010-2025 (14 years) - FULL MODERN ERA',
+        'days_back': 5673,
+        'description': 'Complete post-financial crisis era'
+    }
+}
+
+# LIVE BASELINE PERFORMANCE (Reference Standard)
+LIVE_BASELINE = {
+    'profit_factor': 2.5,
+    'win_rate': 40.0,
+    'tolerance': 0.15  # 15% tolerance
+}
+
 
 def check_system_requirements():
     """Check system resources before starting analysis"""
@@ -47,6 +78,253 @@ def check_system_requirements():
         print("⚠️  WARNING: High memory usage. Close other applications.")
     
     return memory_gb >= 4  # Minimum 4GB required
+
+def discover_all_pairs():
+    """Discover all available currency pairs from data files"""
+    data_files = glob.glob("data/*.csv")
+    pairs = []
+    
+    for file in data_files:
+        filename = os.path.basename(file)
+        # Extract pair name (assuming format like EURUSD_3D.csv)
+        if '_' in filename:
+            pair = filename.split('_')[0]
+            if pair not in pairs and len(pair) == 6:  # Valid forex pair format
+                pairs.append(pair)
+    
+    pairs.sort()
+    print(f"📊 Found {len(pairs)} currency pairs: {', '.join(pairs)}")
+    return pairs
+
+
+def run_comprehensive_multi_analysis(backtester, days_back, analysis_name):
+    """Run comprehensive analysis across all pairs, timeframes, and strategies"""
+    print(f"\n🔄 RUNNING {analysis_name}")
+    print(f"📊 Days back: {days_back:,}")
+    print("=" * 60)
+    
+    # Discover all pairs
+    pairs = discover_all_pairs()
+    if not pairs:
+        print("❌ No currency pairs found in data/ folder")
+        return
+    
+    # All timeframes and strategies
+    timeframes = ['1D', '2D', '3D', '4D', '5D', 'H4', 'H12', 'Weekly']
+    strategies = list(backtester.STRATEGIES.keys())
+    
+    print(f"📊 Testing {len(pairs)} pairs × {len(timeframes)} timeframes × {len(strategies)} strategies")
+    print(f"📊 Total combinations: {len(pairs) * len(timeframes) * len(strategies):,}")
+    
+    all_results = []
+    total_combinations = len(pairs) * len(timeframes) * len(strategies)
+    current_test = 0
+    
+    for pair in pairs:
+        for timeframe in timeframes:
+            for strategy in strategies:
+                current_test += 1
+                print(f"\n🔄 [{current_test:,}/{total_combinations:,}] {pair} {timeframe} {strategy}")
+                
+                result = backtester.run_single_test(pair, timeframe, strategy, days_back)
+                result['analysis_period'] = analysis_name
+                all_results.append(result)
+                
+                if result['total_trades'] > 0:
+                    print(f"   ✅ {result['total_trades']} trades, PF {result['profit_factor']:.2f}")
+                else:
+                    print(f"   ❌ {result['description']}")
+    
+    # Create comprehensive Excel file with multiple tabs
+    if all_results:
+        df_all = pd.DataFrame(all_results)
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        filename = f"results/{analysis_name.lower().replace(' ', '_')}_comprehensive_{timestamp}.xlsx"
+        os.makedirs('results', exist_ok=True)
+        
+        with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+            # Tab 1: All Results
+            df_all.to_excel(writer, sheet_name='All_Results', index=False)
+            
+            # Tab 2: Quality Analysis (aggregated)
+            successful_df = df_all[df_all['total_trades'] > 0]
+            if len(successful_df) > 0:
+                quality_analysis = create_quality_analysis_tab(successful_df)
+                quality_analysis.to_excel(writer, sheet_name='Quality_Analysis', index=False)
+                
+                # Tab 3: Quality Analysis by Timeframe
+                quality_by_tf = create_quality_analysis_by_timeframe(successful_df)
+                quality_by_tf.to_excel(writer, sheet_name='Quality_Analysis_by_Timeframe', index=False)
+                
+                # Tab 4: Quality Analysis by Pair
+                quality_by_pair = create_quality_analysis_by_pair(successful_df)
+                quality_by_pair.to_excel(writer, sheet_name='Quality_Analysis_by_Pair', index=False)
+        
+        print(f"\n📁 COMPREHENSIVE RESULTS SAVED: {filename}")
+        print(f"📊 4 Excel tabs created with full analysis breakdown")
+    
+    # Summary
+    successful_results = [r for r in all_results if r['total_trades'] > 0]
+    print(f"\n🎯 {analysis_name} COMPREHENSIVE SUMMARY:")
+    print(f"   Total combinations tested: {total_combinations:,}")
+    print(f"   Successful combinations: {len(successful_results):,}")
+    print(f"   Success rate: {len(successful_results)/total_combinations*100:.1f}%")
+    
+    if successful_results:
+        avg_pf = sum(r['profit_factor'] for r in successful_results) / len(successful_results)
+        avg_wr = sum(r['win_rate'] for r in successful_results) / len(successful_results)
+        print(f"   Average PF: {avg_pf:.2f}")
+        print(f"   Average WR: {avg_wr:.1f}%")
+        
+        # Best overall performer
+        best = max(successful_results, key=lambda x: x['profit_factor'])
+        print(f"   Best overall: {best['pair']} {best['timeframe']} {best['strategy']}")
+        print(f"   Best performance: PF {best['profit_factor']:.2f}, WR {best['win_rate']:.1f}%")
+    
+    return successful_results
+
+def create_quality_analysis_tab(df):
+    """Create aggregated quality analysis across all pairs/timeframes"""
+    baseline_pf = df[df['strategy'] == 'Baseline']['profit_factor'].mean() if len(df[df['strategy'] == 'Baseline']) > 0 else 1.0
+    
+    analysis = df.groupby('strategy').agg({
+        'profit_factor': 'mean',
+        'win_rate': 'mean', 
+        'total_trades': 'sum',
+        'avg_quality_score': 'mean',
+        'avg_zone_age_days': 'mean'
+    }).round(3)
+    
+    analysis['improvement_vs_baseline'] = ((analysis['profit_factor'] - baseline_pf) / baseline_pf * 100).round(1)
+    analysis = analysis.sort_values('profit_factor', ascending=False)
+    
+    # Rename columns to match your format
+    analysis.columns = ['Profit_Factor', 'Win_Rate', 'Total_Trades', 'Avg_Quality_Score', 'Avg_Zone_Age_Days', 'Improvement_vs_Baseline']
+    analysis['Improvement_vs_Baseline'] = analysis['Improvement_vs_Baseline'].apply(lambda x: f"{x:+.1f}%")
+    
+    return analysis.reset_index()
+
+def create_quality_analysis_by_timeframe(df):
+    """Create quality analysis broken down by timeframe"""
+    results = []
+    
+    for timeframe in df['timeframe'].unique():
+        tf_df = df[df['timeframe'] == timeframe]
+        baseline_pf = tf_df[tf_df['strategy'] == 'Baseline']['profit_factor'].mean() if len(tf_df[tf_df['strategy'] == 'Baseline']) > 0 else 1.0
+        
+        tf_analysis = tf_df.groupby('strategy').agg({
+            'profit_factor': 'mean',
+            'win_rate': 'mean',
+            'total_trades': 'sum', 
+            'avg_quality_score': 'mean',
+            'avg_zone_age_days': 'mean'
+        }).round(3)
+        
+        tf_analysis['improvement_vs_baseline'] = ((tf_analysis['profit_factor'] - baseline_pf) / baseline_pf * 100).round(1)
+        tf_analysis['timeframe'] = timeframe
+        
+        results.append(tf_analysis.reset_index())
+    
+    combined = pd.concat(results, ignore_index=True)
+    combined['Improvement_vs_Baseline'] = combined['improvement_vs_baseline'].apply(lambda x: f"{x:+.1f}%")
+    combined = combined.sort_values(['timeframe', 'profit_factor'], ascending=[True, False])
+    
+    # Rename columns
+    combined.columns = ['Strategy', 'Profit_Factor', 'Win_Rate', 'Total_Trades', 'Avg_Quality_Score', 'Avg_Zone_Age_Days', 'Improvement_vs_Baseline', 'Timeframe']
+    return combined[['Timeframe', 'Strategy', 'Profit_Factor', 'Win_Rate', 'Total_Trades', 'Avg_Quality_Score', 'Avg_Zone_Age_Days', 'Improvement_vs_Baseline']]
+
+def create_quality_analysis_by_pair(df):
+    """Create quality analysis broken down by pair"""
+    results = []
+    
+    for pair in df['pair'].unique():
+        pair_df = df[df['pair'] == pair]
+        baseline_pf = pair_df[pair_df['strategy'] == 'Baseline']['profit_factor'].mean() if len(pair_df[pair_df['strategy'] == 'Baseline']) > 0 else 1.0
+        
+        pair_analysis = pair_df.groupby('strategy').agg({
+            'profit_factor': 'mean',
+            'win_rate': 'mean',
+            'total_trades': 'sum',
+            'avg_quality_score': 'mean', 
+            'avg_zone_age_days': 'mean'
+        }).round(3)
+        
+        pair_analysis['improvement_vs_baseline'] = ((pair_analysis['profit_factor'] - baseline_pf) / baseline_pf * 100).round(1)
+        pair_analysis['pair'] = pair
+        
+        results.append(pair_analysis.reset_index())
+    
+    combined = pd.concat(results, ignore_index=True)
+    combined['Improvement_vs_Baseline'] = combined['improvement_vs_baseline'].apply(lambda x: f"{x:+.1f}%")
+    combined = combined.sort_values(['pair', 'profit_factor'], ascending=[True, False])
+    
+    # Rename columns
+    combined.columns = ['Strategy', 'Profit_Factor', 'Win_Rate', 'Total_Trades', 'Avg_Quality_Score', 'Avg_Zone_Age_Days', 'Improvement_vs_Baseline', 'Pair']
+    return combined[['Pair', 'Strategy', 'Profit_Factor', 'Win_Rate', 'Total_Trades', 'Avg_Quality_Score', 'Avg_Zone_Age_Days', 'Improvement_vs_Baseline']]
+
+def results_consistent(primary, recent, tolerance=0.15):
+    """Check if results are within 15% tolerance"""
+    
+    pf_diff = abs(primary['profit_factor'] - recent['profit_factor']) / primary['profit_factor']
+    wr_diff = abs(primary['win_rate'] - recent['win_rate']) / primary['win_rate']
+    
+    print(f"\n📋 CONSISTENCY ANALYSIS:")
+    print(f"   PF Difference: {pf_diff*100:.1f}% (tolerance: {tolerance*100:.0f}%)")
+    print(f"   WR Difference: {wr_diff*100:.1f}% (tolerance: {tolerance*100:.0f}%)")
+    
+    return pf_diff <= tolerance and wr_diff <= tolerance
+
+def evaluate_results(results):
+    """Evaluate if results meet baseline standards"""
+    pf = results.get('profit_factor', 0)
+    wr = results.get('win_rate', 0)
+    trades = results.get('total_trades', 0)
+    
+    baseline_pf = LIVE_BASELINE['profit_factor']
+    baseline_wr = LIVE_BASELINE['win_rate']
+    tolerance = LIVE_BASELINE['tolerance']
+    
+    pf_ok = pf >= baseline_pf * (1 - tolerance)
+    wr_ok = wr >= baseline_wr * (1 - tolerance)
+    trades_ok = trades >= 5
+    
+    print(f"\n📊 BASELINE EVALUATION:")
+    print(f"   Profit Factor: {pf:.2f} (min: {baseline_pf * (1 - tolerance):.2f}) {'✅' if pf_ok else '❌'}")
+    print(f"   Win Rate: {wr:.1f}% (min: {baseline_wr * (1 - tolerance):.1f}%) {'✅' if wr_ok else '❌'}")
+    print(f"   Trade Count: {trades} (min: 5) {'✅' if trades_ok else '❌'}")
+    
+    return pf_ok and wr_ok and trades_ok
+
+def run_decision_framework(backtester):
+    """Implement 4-step decision framework"""
+    print("\n🎯 BACKTESTING DECISION FRAMEWORK")
+    print("=" * 50)
+    
+    # Step 1: Primary Analysis (2015-2025)
+    print("\n📊 STEP 1: PRIMARY ANALYSIS (2015-2025)")
+    primary_results = backtester.run_single_test('EURUSD', '3D', 'Fresh_HighQuality', 3847)
+    
+    if evaluate_results(primary_results):
+        print("✅ Primary results GOOD - Proceeding to validation")
+        
+        # Step 2: Recent Validation (2020-2025)  
+        print("\n📊 STEP 2: RECENT VALIDATION (2020-2025)")
+        recent_results = backtester.run_single_test('EURUSD', '3D', 'Fresh_HighQuality', 2021)
+        
+        if results_consistent(primary_results, recent_results):
+            print("✅ CONSISTENT RESULTS - IMPLEMENT STRATEGY")
+            return 'IMPLEMENT', primary_results, recent_results
+        else:
+            print("⚠️  DIVERGENT RESULTS - Investigating...")
+            
+            # Step 4: Medium-term Investigation
+            print("\n📊 STEP 4: MEDIUM-TERM INVESTIGATION (2018-2025)")
+            medium_results = backtester.run_single_test('EURUSD', '3D', 'Fresh_HighQuality', 2751)
+            
+            return 'INVESTIGATE', primary_results, recent_results, medium_results
+    else:
+        print("❌ Primary results insufficient")
+        return 'REJECT', primary_results
 
 
 class ZoneQualityBacktester:
@@ -662,36 +940,31 @@ class ZoneQualityBacktester:
 
 
 def main():
-    """Main function with quality analysis options"""
+    """Updated main function with simplified 4-option framework"""
     
-    print("🎯 ZONE QUALITY BACKTESTER")
-    print("⚡ Extended from proven backtest_zone_age_marketcond.py")
-    print("🔬 5-factor quality scoring + comprehensive strategy combinations")
+    print("🎯 ZONE QUALITY BACKTESTING - MODULE 6")
+    print("🏗️  4-Priority Decision System - All Pairs Analysis")
+    print("=" * 60)
     
     # System requirements check
     if not check_system_requirements():
         print("❌ Insufficient system resources. Minimum 4GB RAM required.")
         return
     
-    print("🏗️  Built from proven trading logic")
-    print("🔧 Supports: 1D, 2D, 3D, 4D, 5D, H4, H12, Weekly")
-    print("=" * 60)
-    
+    # Initialize backtester
     backtester = ZoneQualityBacktester()
     
-    print("\nSelect analysis type:")
-    print("1. Quick Quality Test (EURUSD 3D, key strategies)")
-    print("2. Quality vs Baseline Comparison")
-    print("3. Age vs Quality Strategy Comparison")
-    print("4. Complete Quality Analysis (all 12 strategies)")
-    print("5. Multi-Timeframe Quality Test")
-    print("6. Custom Quality Configuration")
+    print("\nSelect analysis mode:")
+    print("1. Quick Validation (EURUSD only - test functionality)")
+    print("2. Priority 1: 2015-2025 (10 years) - PRIMARY ANALYSIS (Days back: 3,847)")
+    print("3. Priority 2: 2020-2025 (4 years) - RECENT VALIDATION (Days back: 2,021)")
+    print("4. Priority 3: 2018-2025 (6 years) - MEDIUM-TERM VIEW (Days back: 2,751)")
     
-    choice = input("\nEnter choice (1-6): ").strip()
+    choice = input("\nEnter choice (1-4): ").strip()
     
     if choice == '1':
-        # Quick quality test
-        print("🧪 QUICK QUALITY TEST - Key Strategies:")
+        # Quick validation - EURUSD only with 5 key strategies (same as original)
+        print("\n🧪 QUICK VALIDATION - Key Strategies Test:")
         
         key_strategies = ['Baseline', 'High_Quality_Only', 'Premium_Quality', 'Base_1_Only', 'Fresh_HighQuality']
         
@@ -707,231 +980,32 @@ def main():
             
             if result['total_trades'] == 0:
                 print(f"   ❌ Issue: {result['description']}")
-    
+        
+        print(f"\n✅ QUICK VALIDATION COMPLETE - All 5 strategies tested")
+        
     elif choice == '2':
-        # Quality vs baseline comparison
-        print("\n🔬 QUALITY vs BASELINE COMPARISON")
+        # Priority 1: Primary Analysis
+        run_comprehensive_multi_analysis(backtester, 3847, "Priority_1_Primary_Analysis")
         
-        quality_strategies = ['Baseline', 'High_Quality_Only', 'Premium_Quality', 'Base_1_Only', 'Strong_LegOut_Only']
-        results = []
-        
-        for strategy in quality_strategies:
-            result = backtester.run_single_test('EURUSD', '3D', strategy, 730)
-            results.append(result)
-            
-            print(f"   {strategy}: {result['total_trades']} trades, "
-                    f"PF {result['profit_factor']:.2f}, Quality {result.get('avg_quality_score', 0):.3f}")
-        
-        # Find best quality strategy
-        successful = [r for r in results if r['total_trades'] > 0]
-        if successful:
-            baseline = next((r for r in successful if r['strategy'] == 'Baseline'), None)
-            quality_only = [r for r in successful if r['strategy'] != 'Baseline']
-            
-            if baseline and quality_only:
-                best_quality = max(quality_only, key=lambda x: x['profit_factor'])
-                improvement = ((best_quality['profit_factor'] - baseline['profit_factor']) / baseline['profit_factor'] * 100) if baseline['profit_factor'] > 0 else 0
-                print(f"\n🏆 Best Quality Strategy: {best_quality['strategy']}")
-                print(f"   PF: {best_quality['profit_factor']:.2f} ({improvement:+.1f}% vs baseline)")
-    
     elif choice == '3':
-        # Age vs quality comparison
-        print("\n⚖️  AGE vs QUALITY STRATEGY COMPARISON")
+        # Priority 2: Recent Validation
+        run_comprehensive_multi_analysis(backtester, 2021, "Priority_2_Recent_Validation")
         
-        age_strategies = ['Ultra_Fresh_Only', 'Fresh_Only', 'Combined_Fresh']
-        quality_strategies = ['High_Quality_Only', 'Premium_Quality', 'Base_1_Only']
-        combined_strategies = ['Fresh_HighQuality', 'Fresh_Premium', 'UltraFresh_Base1']
-        
-        all_strategies = age_strategies + quality_strategies + combined_strategies
-        results = []
-        
-        for strategy in all_strategies:
-            result = backtester.run_single_test('EURUSD', '3D', strategy, 730)
-            results.append(result)
-            
-            category = "AGE" if strategy in age_strategies else "QUALITY" if strategy in quality_strategies else "COMBINED"
-            print(f"   [{category}] {strategy}: {result['total_trades']} trades, PF {result['profit_factor']:.2f}")
-        
-        # Find best in each category
-        successful = [r for r in results if r['total_trades'] > 0]
-        if successful:
-            age_results = [r for r in successful if r['strategy'] in age_strategies]
-            quality_results = [r for r in successful if r['strategy'] in quality_strategies]
-            combined_results = [r for r in successful if r['strategy'] in combined_strategies]
-            
-            print(f"\n🏆 CATEGORY WINNERS:")
-            if age_results:
-                best_age = max(age_results, key=lambda x: x['profit_factor'])
-                print(f"   Age: {best_age['strategy']} (PF: {best_age['profit_factor']:.2f})")
-            
-            if quality_results:
-                best_quality = max(quality_results, key=lambda x: x['profit_factor'])
-                print(f"   Quality: {best_quality['strategy']} (PF: {best_quality['profit_factor']:.2f})")
-            
-            if combined_results:
-                best_combined = max(combined_results, key=lambda x: x['profit_factor'])
-                print(f"   Combined: {best_combined['strategy']} (PF: {best_combined['profit_factor']:.2f})")
-    
     elif choice == '4':
-        # Complete quality analysis
-        print("\n📊 COMPLETE QUALITY ANALYSIS (all 12 strategies)")
+        # Priority 3: Medium-term View
+        run_comprehensive_multi_analysis(backtester, 2751, "Priority_3_Medium_Term_View")
         
-        all_results = []
-        total_strategies = len(backtester.STRATEGIES)
-        current_strategy = 0
-        
-        for strategy_name in backtester.STRATEGIES.keys():
-            current_strategy += 1
-            print(f"\n🔄 Testing strategy {current_strategy}/{total_strategies}: {strategy_name}")
-            
-            result = backtester.run_single_test('EURUSD', '3D', strategy_name, 730)
-            all_results.append(result)
-            
-            if result['total_trades'] > 0:
-                print(f"   ✅ {result['total_trades']} trades, PF {result['profit_factor']:.2f}, "
-                        f"Quality {result.get('avg_quality_score', 0):.3f}")
-            else:
-                print(f"   ❌ No trades: {result['description']}")
-        
-        # Create results DataFrame
-        df = pd.DataFrame(all_results)
-        successful_df = df[df['total_trades'] > 0]
-        
-        if len(successful_df) > 0:
-            # Sort by profit factor
-            successful_df = successful_df.sort_values('profit_factor', ascending=False)
-            
-            print(f"\n🎯 QUALITY ANALYSIS RESULTS:")
-            print(f"   Total strategies tested: {len(df)}")
-            print(f"   Successful strategies: {len(successful_df)}")
-            
-            # Top 5 strategies
-            print(f"\n🏆 TOP 5 STRATEGIES:")
-            for i, (_, row) in enumerate(successful_df.head(5).iterrows()):
-                print(f"   {i+1}. {row['strategy']}: PF {row['profit_factor']:.2f}, "
-                        f"WR {row['win_rate']:.1f}%, Quality {row.get('avg_quality_score', 0):.3f}")
-            
-            # Save to Excel
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f"results/zone_quality_analysis_{timestamp}.xlsx"
-            os.makedirs('results', exist_ok=True)
-            
-            with pd.ExcelWriter(filename, engine='openpyxl') as writer:
-                df.to_excel(writer, sheet_name='All_Results', index=False)
-                successful_df.to_excel(writer, sheet_name='Successful_Strategies', index=False)
-                
-                # Quality analysis
-                quality_summary = []
-                baseline_pf = df[df['strategy'] == 'Baseline']['profit_factor'].iloc[0] if len(df[df['strategy'] == 'Baseline']) > 0 else 0
-                
-                for _, row in successful_df.iterrows():
-                    if row['strategy'] != 'Baseline':
-                        improvement = ((row['profit_factor'] - baseline_pf) / baseline_pf * 100) if baseline_pf > 0 else 0
-                        quality_summary.append({
-                            'Strategy': row['strategy'],
-                            'Profit_Factor': row['profit_factor'],
-                            'Improvement_vs_Baseline': f"{improvement:+.1f}%",
-                            'Win_Rate': row['win_rate'],
-                            'Total_Trades': row['total_trades'],
-                            'Avg_Quality_Score': row.get('avg_quality_score', 0),
-                            'Avg_Zone_Age_Days': row.get('avg_zone_age_days', 0)
-                        })
-                
-                quality_df = pd.DataFrame(quality_summary)
-                quality_df.to_excel(writer, sheet_name='Quality_Analysis', index=False)
-            
-            print(f"\n📁 EXCEL REPORT SAVED: {filename}")
-        else:
-            print("❌ No successful strategies found")
+    else:
+        print("❌ Invalid choice. Please select 1-4.")
+        return
+        # Decision Framework Summary
+    print(f"\n🎯 YOUR DECISION FRAMEWORK:")
+    print(f"   Step 1: Run Priority 2 (3,847 days) → Review results")
+    print(f"   Step 2: If good → Run Priority 3 (2,021 days) validation")
+    print(f"   Step 3: If consistent → ✅ IMPLEMENT")
+    print(f"   Step 4: If divergent → Investigate with Priority 4 (2,751 days)")
     
-    elif choice == '5':
-        # Multi-timeframe quality test
-        print("\n📊 MULTI-TIMEFRAME QUALITY TEST")
-        
-        timeframes = ['1D', '2D', '3D', '4D', '5D']
-        strategy = 'Fresh_HighQuality'  # Best combined strategy
-        
-        for tf in timeframes:
-            print(f"\n🕒 Testing {tf} timeframe...")
-            result = backtester.run_single_test('EURUSD', tf, strategy, 730)
-            
-            if result['total_trades'] > 0:
-                print(f"   ✅ {tf}: {result['total_trades']} trades, "
-                        f"PF {result['profit_factor']:.2f}, Quality {result.get('avg_quality_score', 0):.3f}")
-            else:
-                print(f"   ❌ {tf}: {result['description']}")
-    
-    elif choice == '6':
-        # Custom quality configuration
-        print("\n🔧 CUSTOM QUALITY CONFIGURATION")
-        
-        pairs_input = input("Enter pairs (comma-separated, e.g., EURUSD,GBPUSD): ").strip().upper()
-        pairs = [p.strip() for p in pairs_input.split(',')] if pairs_input else ['EURUSD']
-        
-        tf_input = input("Enter timeframes (comma-separated, e.g., 1D,3D,5D): ").strip()
-        timeframes = [tf.strip() for tf in tf_input.split(',')] if tf_input else ['3D']
-        
-        days_input = input("Enter days back (default 730): ").strip()
-        days_back = int(days_input) if days_input.isdigit() else 730
-        
-        strategies_input = input("Enter strategies (comma-separated, default: key strategies): ").strip()
-        if strategies_input:
-            strategies = [s.strip() for s in strategies_input.split(',')]
-        else:
-            strategies = ['Baseline', 'High_Quality_Only', 'Premium_Quality', 'Fresh_HighQuality']
-        
-        print(f"\n📊 Running custom quality analysis:")
-        print(f"   Pairs: {pairs}")
-        print(f"   Timeframes: {timeframes}")
-        print(f"   Strategies: {strategies}")
-        print(f"   Days back: {days_back}")
-        
-        all_results = []
-        total_tests = len(pairs) * len(timeframes) * len(strategies)
-        current_test = 0
-        
-        for pair in pairs:
-            for timeframe in timeframes:
-                for strategy in strategies:
-                    current_test += 1
-                    print(f"\n🔄 Test {current_test}/{total_tests}: {pair} {timeframe} {strategy}")
-                    
-                    result = backtester.run_single_test(pair, timeframe, strategy, days_back)
-                    all_results.append(result)
-                    
-                    if result['total_trades'] > 0:
-                        print(f"   ✅ {result['total_trades']} trades, PF {result['profit_factor']:.2f}")
-                    else:
-                        print(f"   ❌ {result['description']}")
-        
-        # Save custom results
-        df = pd.DataFrame(all_results)
-        successful_df = df[df['total_trades'] > 0]
-        
-        if len(successful_df) > 0:
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f"results/custom_quality_analysis_{timestamp}.xlsx"
-            os.makedirs('results', exist_ok=True)
-            df.to_excel(filename, index=False)
-            print(f"\n📁 CUSTOM RESULTS SAVED: {filename}")
-            
-            # Print summary
-            print(f"\n🎯 CUSTOM ANALYSIS SUMMARY:")
-            print(f"   Total tests: {len(df)}")
-            print(f"   Successful tests: {len(successful_df)}")
-            
-            if len(successful_df) > 0:
-                best = successful_df.loc[successful_df['profit_factor'].idxmax()]
-                print(f"   Best result: {best['pair']} {best['timeframe']} {best['strategy']}")
-                print(f"   Performance: PF {best['profit_factor']:.2f}, WR {best['win_rate']:.1f}%")
-        else:
-            print("❌ No successful tests in custom configuration")
-    
-    print("\n✅ ZONE QUALITY ANALYSIS COMPLETE!")
-    print("🔬 5-factor quality scoring implemented")
-    print("📊 Comprehensive strategy comparison available")
-    print("📁 Detailed Excel reports saved in results/ folder")
-
+    print("\n✅ ANALYSIS COMPLETE!")
 
 if __name__ == "__main__":
-   main()
+    main()
