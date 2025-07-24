@@ -28,6 +28,15 @@ from modules.zone_detector import ZoneDetector
 from modules.trend_classifier import TrendClassifier
 from modules.risk_manager import RiskManager
 
+# Set process priority for maximum CPU usage
+try:
+    if os.name == 'nt':  # Windows
+        import ctypes
+        # Set high priority
+        ctypes.windll.kernel32.SetPriorityClass(ctypes.windll.kernel32.GetCurrentProcess(), 0x80)
+except:
+    pass
+
 # UPDATED BACKTESTING FRAMEWORK - MODULE 6
 ANALYSIS_PERIODS = {
     'priority_1': {
@@ -98,7 +107,7 @@ def discover_all_pairs():
 
 
 def run_comprehensive_multi_analysis(backtester, days_back, analysis_name):
-    """Run comprehensive analysis across all pairs, timeframes, and strategies"""
+    """Run comprehensive analysis with parallel processing optimization"""
     print(f"\n🔄 RUNNING {analysis_name}")
     print(f"📊 Days back: {days_back:,}")
     print("=" * 60)
@@ -113,27 +122,24 @@ def run_comprehensive_multi_analysis(backtester, days_back, analysis_name):
     timeframes = ['1D', '2D', '3D', '4D', '5D', 'H4', 'H12', 'Weekly']
     strategies = list(backtester.STRATEGIES.keys())
     
-    print(f"📊 Testing {len(pairs)} pairs × {len(timeframes)} timeframes × {len(strategies)} strategies")
-    print(f"📊 Total combinations: {len(pairs) * len(timeframes) * len(strategies):,}")
-    
-    all_results = []
-    total_combinations = len(pairs) * len(timeframes) * len(strategies)
-    current_test = 0
-    
+    # Create test combinations
+    test_combinations = []
     for pair in pairs:
         for timeframe in timeframes:
             for strategy in strategies:
-                current_test += 1
-                print(f"\n🔄 [{current_test:,}/{total_combinations:,}] {pair} {timeframe} {strategy}")
-                
-                result = backtester.run_single_test(pair, timeframe, strategy, days_back)
-                result['analysis_period'] = analysis_name
-                all_results.append(result)
-                
-                if result['total_trades'] > 0:
-                    print(f"   ✅ {result['total_trades']} trades, PF {result['profit_factor']:.2f}")
-                else:
-                    print(f"   ❌ {result['description']}")
+                test_combinations.append({
+                    'pair': pair,
+                    'timeframe': timeframe,
+                    'strategy': strategy,
+                    'days_back': days_back,
+                    'analysis_name': analysis_name
+                })
+    
+    print(f"📊 Testing {len(pairs)} pairs × {len(timeframes)} timeframes × {len(strategies)} strategies")
+    print(f"📊 Total combinations: {len(test_combinations):,}")
+    
+    # Run optimized parallel processing
+    all_results = run_parallel_tests_optimized(backtester, test_combinations)
     
     # Create comprehensive Excel file with multiple tabs
     if all_results:
@@ -166,9 +172,9 @@ def run_comprehensive_multi_analysis(backtester, days_back, analysis_name):
     # Summary
     successful_results = [r for r in all_results if r['total_trades'] > 0]
     print(f"\n🎯 {analysis_name} COMPREHENSIVE SUMMARY:")
-    print(f"   Total combinations tested: {total_combinations:,}")
+    print(f"   Total combinations tested: {len(all_results):,}")
     print(f"   Successful combinations: {len(successful_results):,}")
-    print(f"   Success rate: {len(successful_results)/total_combinations*100:.1f}%")
+    print(f"   Success rate: {len(successful_results)/len(all_results)*100:.1f}%")
     
     if successful_results:
         avg_pf = sum(r['profit_factor'] for r in successful_results) / len(successful_results)
@@ -182,6 +188,89 @@ def run_comprehensive_multi_analysis(backtester, days_back, analysis_name):
         print(f"   Best performance: PF {best['profit_factor']:.2f}, WR {best['win_rate']:.1f}%")
     
     return successful_results
+
+def run_parallel_tests_optimized(backtester, test_combinations):
+    """Optimized parallel processing with memory management"""
+    from multiprocessing import Pool
+    import time
+    
+    print(f"\n🔄 Starting optimized parallel execution...")
+    start_time = time.time()
+    results = []
+    
+    # Process in chunks for memory management
+    chunk_size = backtester.chunk_size
+    total_chunks = (len(test_combinations) + chunk_size - 1) // chunk_size
+    
+    for chunk_idx in range(total_chunks):
+        chunk_start = chunk_idx * chunk_size
+        chunk_end = min(chunk_start + chunk_size, len(test_combinations))
+        chunk_tests = test_combinations[chunk_start:chunk_end]
+        
+        print(f"\n📦 Processing chunk {chunk_idx + 1}/{total_chunks} ({len(chunk_tests)} tests)")
+        
+        # Memory check before chunk
+        memory_percent = psutil.virtual_memory().percent
+        print(f"💾 Memory usage: {memory_percent:.1f}%")
+        
+        if memory_percent > backtester.memory_threshold * 100:
+            print("⚠️  High memory usage, triggering cleanup...")
+            gc.collect()
+        
+        # Process chunk with multiprocessing
+        with Pool(processes=backtester.max_workers) as pool:
+            chunk_results = pool.map(run_single_test_worker, chunk_tests)
+            results.extend(chunk_results)
+        
+        # Progress tracking
+        completed = chunk_end
+        progress = (completed / len(test_combinations)) * 100
+        print(f"✅ Chunk complete. Progress: {progress:.1f}% ({completed}/{len(test_combinations)})")
+        
+        # Memory cleanup after each chunk
+        gc.collect()
+    
+    total_time = time.time() - start_time
+    success_count = len([r for r in results if r.get('total_trades', 0) > 0])
+    
+    print(f"\n✅ OPTIMIZED PARALLEL EXECUTION COMPLETE!")
+    print(f"⏱️  Total time: {total_time:.1f}s")
+    print(f"🎯 Success rate: {success_count}/{len(test_combinations)} ({success_count/len(test_combinations)*100:.1f}%)")
+    print(f"⚡ Speed: {len(test_combinations)/total_time:.1f} tests/second")
+    
+    return results
+
+def run_single_test_worker(test_config):
+    """Worker function for parallel processing"""
+    try:
+        # Create fresh backtester instance
+        backtester = ZoneQualityBacktester(max_workers=1)
+        
+        result = backtester.run_single_test(
+            test_config['pair'],
+            test_config['timeframe'],
+            test_config['strategy'],
+            test_config['days_back']
+        )
+        
+        result['analysis_period'] = test_config['analysis_name']
+        
+        # Clean up
+        del backtester
+        gc.collect()
+        
+        return result
+        
+    except Exception as e:
+        gc.collect()
+        return {
+            'pair': test_config['pair'],
+            'timeframe': test_config['timeframe'],
+            'strategy': test_config['strategy'],
+            'analysis_period': test_config['analysis_name'],
+            'total_trades': 0,
+            'description': f"Worker error: {str(e)}"
+        }
 
 def create_quality_analysis_tab(df):
     """Create aggregated quality analysis across all pairs/timeframes"""
@@ -446,13 +535,26 @@ class ZoneQualityBacktester:
     
     def __init__(self, max_workers=None):
         """Initialize with system optimization"""
-        self.max_workers = max_workers or max(1, cpu_count() - 1)
+        # CPU optimization for i5-10400F (6C/12T)
+        available_cores = cpu_count()
+        if available_cores >= 12:  # Hyperthreaded 6-core
+            self.max_workers = 10  # Leave 2 threads for system
+        elif available_cores >= 6:
+            self.max_workers = available_cores - 1
+        else:
+            self.max_workers = max(1, available_cores - 1)
+        
+        # Memory optimization settings
+        self.chunk_size = 100  # Process in chunks
+        self.memory_threshold = 0.75  # 75% memory trigger cleanup
+        
         self.data_loader = DataLoader()
         
         print(f"🎯 ZONE QUALITY BACKTESTER INITIALIZED")
         print(f"   💡 5-factor quality scoring system")
         print(f"   🔄 {len(self.STRATEGIES)} quality + age strategies")
-        print(f"   ⚡ {self.max_workers} parallel workers")
+        print(f"   ⚡ {self.max_workers} parallel workers (optimized)")
+        print(f"   💾 Memory threshold: {self.memory_threshold*100:.0f}%")
     
     def calculate_zone_quality_score(self, pattern: Dict) -> float:
         """
