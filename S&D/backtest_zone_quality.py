@@ -89,20 +89,37 @@ def check_system_requirements():
     return memory_gb >= 4  # Minimum 4GB required
 
 def discover_all_pairs():
-    """Discover all available currency pairs from data files"""
-    data_files = glob.glob("data/*.csv")
+    """Discover all available currency pairs from data files using DataLoader path"""
+    from modules.data_loader import DataLoader
+    
+    # Use DataLoader to get the correct path
+    data_loader = DataLoader()
+    data_path = data_loader.raw_path
+    
+    print(f"🔍 Searching in: {data_path}")
+    
+    data_files = glob.glob(os.path.join(data_path, "*.csv"))
+    print(f"📁 Found {len(data_files)} CSV files")
+    
     pairs = []
     
     for file in data_files:
         filename = os.path.basename(file)
-        # Extract pair name (assuming format like EURUSD_3D.csv)
-        if '_' in filename:
-            pair = filename.split('_')[0]
-            if pair not in pairs and len(pair) == 6:  # Valid forex pair format
-                pairs.append(pair)
+        
+        # Handle your OANDA format: OANDA_AUDCAD, 1D_0d7fe.csv
+        if 'OANDA_' in filename and ', ' in filename:
+            # Remove OANDA_ prefix and .csv suffix
+            clean_name = filename.replace('OANDA_', '').replace('.csv', '')
+            # Split on comma-space to get pair
+            parts = clean_name.split(', ')
+            if len(parts) >= 1:
+                pair = parts[0]  # AUDCAD
+                if pair not in pairs and len(pair) == 6:  # Valid forex pair format
+                    pairs.append(pair)
     
     pairs.sort()
     print(f"📊 Found {len(pairs)} currency pairs: {', '.join(pairs)}")
+    
     return pairs
 
 
@@ -243,8 +260,12 @@ def run_parallel_tests_optimized(backtester, test_combinations):
 def run_single_test_worker(test_config):
     """Worker function for parallel processing"""
     try:
-        # Create fresh backtester instance
+        # Create fresh backtester instance with proper error handling
         backtester = ZoneQualityBacktester(max_workers=1)
+        
+        # Verify DataLoader is working
+        if not hasattr(backtester, 'data_loader') or backtester.data_loader is None:
+            raise Exception(f"DataLoader initialization failed")
         
         result = backtester.run_single_test(
             test_config['pair'],
@@ -535,6 +556,12 @@ class ZoneQualityBacktester:
     
     def __init__(self, max_workers=None):
         """Initialize with system optimization"""
+        # Import here to avoid circular imports
+        from modules.data_loader import DataLoader
+        
+        # Initialize DataLoader with correct path
+        self.data_loader = DataLoader()
+
         # CPU optimization for i5-10400F (6C/12T)
         available_cores = cpu_count()
         if available_cores >= 12:  # Hyperthreaded 6-core
@@ -547,9 +574,7 @@ class ZoneQualityBacktester:
         # Memory optimization settings
         self.chunk_size = 100  # Process in chunks
         self.memory_threshold = 0.75  # 75% memory trigger cleanup
-        
-        self.data_loader = DataLoader()
-        
+                
         print(f"🎯 ZONE QUALITY BACKTESTER INITIALIZED")
         print(f"   💡 5-factor quality scoring system")
         print(f"   🔄 {len(self.STRATEGIES)} quality + age strategies")
