@@ -161,6 +161,13 @@ def run_comprehensive_multi_analysis(backtester, days_back, analysis_name):
     # Create comprehensive Excel file with multiple tabs
     if all_results:
         df_all = pd.DataFrame(all_results)
+        
+        # IMMEDIATE EMERGENCY SAVE - preserve your 40-minute analysis
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        emergency_filename = f"results/{analysis_name.lower().replace(' ', '_')}_EMERGENCY_SAVE_{timestamp}.xlsx"
+        print(f"\n🚨 EMERGENCY SAVE: Preserving your 40-minute analysis...")
+        df_all.to_excel(emergency_filename, index=False)
+        print(f"✅ EMERGENCY SAVE COMPLETE: {emergency_filename}")
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         filename = f"results/{analysis_name.lower().replace(' ', '_')}_comprehensive_{timestamp}.xlsx"
         os.makedirs('results', exist_ok=True)
@@ -176,8 +183,18 @@ def run_comprehensive_multi_analysis(backtester, days_back, analysis_name):
                 quality_analysis.to_excel(writer, sheet_name='Quality_Analysis', index=False)
                 
                 # Tab 3: Quality Analysis by Timeframe
-                quality_by_tf = create_quality_analysis_by_timeframe(successful_df)
-                quality_by_tf.to_excel(writer, sheet_name='Quality_Analysis_by_Timeframe', index=False)
+                try:
+                    quality_by_tf = create_quality_analysis_by_timeframe(successful_df)
+                    quality_by_tf.to_excel(writer, sheet_name='Quality_Analysis_by_Timeframe', index=False)
+                except Exception as e:
+                    print(f"⚠️  Timeframe analysis failed: {e}")
+                    # Create basic timeframe summary as fallback
+                    tf_summary = successful_df.groupby(['timeframe', 'strategy']).agg({
+                        'profit_factor': 'mean',
+                        'win_rate': 'mean',
+                        'total_trades': 'sum'
+                    }).round(2).reset_index()
+                    tf_summary.to_excel(writer, sheet_name='Quality_Analysis_by_Timeframe', index=False)
                 
                 # Tab 4: Quality Analysis by Pair
                 quality_by_pair = create_quality_analysis_by_pair(successful_df)
@@ -1064,7 +1081,36 @@ class ZoneQualityBacktester:
             
         except Exception as e:
             return self.create_empty_result(pair, timeframe, strategy_name, f"Error: {str(e)}")
-
+    def save_results_emergency(all_results, analysis_name):
+        """Emergency save function to preserve your 40-minute analysis"""
+        if all_results:
+            df_all = pd.DataFrame(all_results)
+            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+            filename = f"results/{analysis_name.lower().replace(' ', '_')}_EMERGENCY_SAVE_{timestamp}.xlsx"
+            os.makedirs('results', exist_ok=True)
+            
+            print(f"\n🚨 EMERGENCY SAVE: Preserving your 40-minute analysis...")
+            
+            with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+                # Tab 1: All Results (this will definitely work)
+                df_all.to_excel(writer, sheet_name='All_Results', index=False)
+                
+                # Tab 2: Successful only
+                successful_df = df_all[df_all['total_trades'] > 0]
+                if len(successful_df) > 0:
+                    successful_df.to_excel(writer, sheet_name='Successful_Results', index=False)
+                    
+                    # Tab 3: Basic analysis without complex column operations
+                    basic_analysis = successful_df.groupby('strategy').agg({
+                        'profit_factor': 'mean',
+                        'win_rate': 'mean',
+                        'total_trades': 'sum'
+                    }).round(2).reset_index()
+                    basic_analysis.to_excel(writer, sheet_name='Basic_Strategy_Analysis', index=False)
+            
+            print(f"✅ EMERGENCY SAVE COMPLETE: {filename}")
+            return filename
+        return None
 
 def main():
     """Updated main function with simplified 4-option framework"""
