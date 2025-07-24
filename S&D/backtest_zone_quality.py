@@ -808,15 +808,20 @@ class ZoneQualityBacktester:
                 if not self.passes_quality_filter(pattern, quality_score, quality_filter):
                     continue
                 
-                # Check trend alignment
+                # Check trend alignment for ALL pattern types
                 if current_idx >= len(trend_data):
                     continue
                     
                 current_trend = trend_data['trend'].iloc[current_idx]
-                is_aligned = (
-                    (pattern['type'] in ['R-B-R'] and current_trend == 'bullish') or
-                    (pattern['type'] in ['D-B-D'] and current_trend == 'bearish')
-                )
+                
+                # FIXED: Alignment logic for all 4 pattern types
+                is_aligned = False
+                if current_trend == 'bullish':
+                    # Bullish trend: Allow R-B-R (momentum) and D-B-R (reversal)
+                    is_aligned = pattern['type'] in ['R-B-R', 'D-B-R']
+                elif current_trend == 'bearish':
+                    # Bearish trend: Allow D-B-D (momentum) and R-B-D (reversal)
+                    is_aligned = pattern['type'] in ['D-B-D', 'R-B-D']
                 
                 if not is_aligned:
                     continue
@@ -845,21 +850,24 @@ class ZoneQualityBacktester:
     def execute_single_trade_proven(self, pattern: Dict, data: pd.DataFrame,
                                    current_idx: int, timeframe_multiplier: float) -> Optional[Dict]:
         """
-        Execute single trade using PROVEN entry/exit logic
+        Execute single trade using PROVEN entry/exit logic for ALL pattern types
         """
         zone_high = pattern['zone_high']
         zone_low = pattern['zone_low']
         zone_range = zone_high - zone_low
         
-        # PROVEN entry and stop logic
-        if pattern['type'] == 'R-B-R':  # Demand zone
+        # FIXED: Entry and stop logic for ALL 4 pattern types
+        if pattern['type'] in ['R-B-R', 'D-B-R']:  # Demand zones (buy)
             entry_price = zone_low + (zone_range * 0.05)  # 5% front-run
             direction = 'BUY'
             initial_stop = zone_low - (zone_range * 0.33)  # 33% buffer
-        else:  # D-B-D - Supply zone
+        elif pattern['type'] in ['D-B-D', 'R-B-D']:  # Supply zones (sell)
             entry_price = zone_high - (zone_range * 0.05)  # 5% front-run
             direction = 'SELL'
             initial_stop = zone_high + (zone_range * 0.33)  # 33% buffer
+        else:
+            print(f"⚠️  Unknown pattern type: {pattern['type']}")
+            return None
         
         # Check if current price can trigger entry
         current_candle = data.iloc[current_idx]
@@ -895,27 +903,44 @@ class ZoneQualityBacktester:
         # Simulate trade outcome
         entry_time = data.index[current_idx]
         
-        # Look ahead for exit (simplified simulation)
-        for exit_idx in range(current_idx + 1, min(current_idx + 100, len(data))):
+        # FIXED: Realistic trade simulation with break-even management
+        current_stop = initial_stop
+        breakeven_moved = False
+        
+        # Look ahead for exit with proper trade management
+        for exit_idx in range(current_idx + 1, min(current_idx + 200, len(data))):
             exit_candle = data.iloc[exit_idx]
             exit_time = data.index[exit_idx]
             
+            # Calculate current R:R for break-even move
+            if direction == 'BUY':
+                current_rr = (exit_candle['close'] - entry_price) / risk_distance
+            else:
+                current_rr = (entry_price - exit_candle['close']) / risk_distance
+            
+            # Move to break-even at 1R
+            if not breakeven_moved and current_rr >= 1.0:
+                current_stop = entry_price
+                breakeven_moved = True
+            
             # Check stops and targets
             if direction == 'BUY':
-                if exit_candle['low'] <= initial_stop:
-                    # Stopped out
+                if exit_candle['low'] <= current_stop:
+                    # Calculate actual PnL
+                    pnl = (current_stop - entry_price) * position_size * 100000
                     return {
                         'entry_time': entry_time,
                         'exit_time': exit_time,
                         'direction': direction,
                         'entry_price': entry_price,
-                        'exit_price': initial_stop,
-                        'result': 'LOSS',
-                        'pips': -stop_distance_pips,
-                        'position_size': position_size
+                        'exit_price': current_stop,
+                        'result': 'LOSS' if pnl < 0 else 'BREAKEVEN',
+                        'pips': (current_stop - entry_price) / 0.0001,
+                        'pnl': pnl
                     }
                 elif exit_candle['high'] >= target_price:
-                    # Target hit
+                    # Target hit - calculate realistic PnL
+                    pnl = (target_price - entry_price) * position_size * 100000
                     return {
                         'entry_time': entry_time,
                         'exit_time': exit_time,
@@ -923,24 +948,26 @@ class ZoneQualityBacktester:
                         'entry_price': entry_price,
                         'exit_price': target_price,
                         'result': 'WIN',
-                        'pips': stop_distance_pips * 2.5,
-                        'position_size': position_size
+                        'pips': (target_price - entry_price) / 0.0001,
+                        'pnl': pnl
                     }
             else:  # SELL
-                if exit_candle['high'] >= initial_stop:
-                    # Stopped out
+                if exit_candle['high'] >= current_stop:
+                    # Calculate actual PnL
+                    pnl = (entry_price - current_stop) * position_size * 100000
                     return {
                         'entry_time': entry_time,
                         'exit_time': exit_time,
                         'direction': direction,
                         'entry_price': entry_price,
-                        'exit_price': initial_stop,
-                        'result': 'LOSS',
-                        'pips': -stop_distance_pips,
-                        'position_size': position_size
+                        'exit_price': current_stop,
+                        'result': 'LOSS' if pnl < 0 else 'BREAKEVEN',
+                        'pips': (entry_price - current_stop) / 0.0001,
+                        'pnl': pnl
                     }
                 elif exit_candle['low'] <= target_price:
-                    # Target hit
+                    # Target hit - calculate realistic PnL
+                    pnl = (entry_price - target_price) * position_size * 100000
                     return {
                         'entry_time': entry_time,
                         'exit_time': exit_time,
@@ -948,8 +975,8 @@ class ZoneQualityBacktester:
                         'entry_price': entry_price,
                         'exit_price': target_price,
                         'result': 'WIN',
-                        'pips': stop_distance_pips * 2.5,
-                        'position_size': position_size
+                        'pips': (entry_price - target_price) / 0.0001,
+                        'pnl': pnl
                     }
         
         # Trade still open at end of simulation (treat as neutral)
@@ -969,13 +996,13 @@ class ZoneQualityBacktester:
         losing_trades = len([t for t in trades if t['result'] == 'LOSS'])
         win_rate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
         
-        # P&L calculation
-        total_pips = sum([t['pips'] for t in trades])
-        gross_profit = sum([t['pips'] for t in trades if t['pips'] > 0])
-        gross_loss = abs(sum([t['pips'] for t in trades if t['pips'] < 0]))
+        # FIXED: P&L calculation using actual dollar amounts
+        total_pnl = sum([t.get('pnl', 0) for t in trades])
+        gross_profit = sum([t.get('pnl', 0) for t in trades if t.get('pnl', 0) > 0])
+        gross_loss = abs(sum([t.get('pnl', 0) for t in trades if t.get('pnl', 0) < 0]))
         
         profit_factor = gross_profit / gross_loss if gross_loss > 0 else 999.0
-        total_return = (total_pips * 10)  # Assuming $10 per pip
+        total_return = (total_pnl / 10000) * 100  # Percentage return on $10,000 account
         
         # Quality-specific metrics
         avg_zone_age = np.mean([t.get('zone_age_days', 0) for t in trades])
@@ -999,7 +1026,6 @@ class ZoneQualityBacktester:
             'win_rate': round(win_rate, 1),
             'profit_factor': round(profit_factor, 2),
             'total_return': round(total_return, 2),
-            'total_pips': round(total_pips, 1),
             'avg_zone_age_days': round(avg_zone_age, 1),
             'avg_quality_score': round(avg_quality_score, 3),
             'quality_distribution': quality_distribution,
@@ -1008,18 +1034,21 @@ class ZoneQualityBacktester:
         }
     
     def run_backtest_with_quality_filters(self, data: pd.DataFrame, patterns: Dict,
-                                        trend_data: pd.DataFrame, risk_manager: RiskManager,
-                                        strategy_config: Dict, pair: str, timeframe: str,
-                                        strategy_name: str) -> Dict:
+                                    trend_data: pd.DataFrame, risk_manager: RiskManager,
+                                    strategy_config: Dict, pair: str, timeframe: str,
+                                    strategy_name: str) -> Dict:
         """
         Run backtest with quality and age filtering
         """
-        # Combine momentum patterns (PROVEN logic)
-        momentum_patterns = patterns['dbd_patterns'] + patterns['rbr_patterns']
+        # FIXED: Include ALL pattern types (momentum + reversal)
+        all_patterns = (patterns['dbd_patterns'] + patterns['rbr_patterns'] + 
+                    patterns.get('dbr_patterns', []) + patterns.get('rbd_patterns', []))
+        
+        print(f"   📊 Found {len(all_patterns)} total patterns (all types)")
         
         # Apply distance filter (PROVEN 2.0x threshold)
         valid_patterns = [
-            pattern for pattern in momentum_patterns
+            pattern for pattern in all_patterns
             if 'leg_out' in pattern and 'ratio_to_base' in pattern['leg_out']
             and pattern['leg_out']['ratio_to_base'] >= 2.0
         ]
