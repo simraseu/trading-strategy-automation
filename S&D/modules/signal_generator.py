@@ -101,19 +101,12 @@ class SignalGenerator:
             
             print(f"   Risk-validated signals: {len(tradeable_signals)}")
             
-            # Step 5: Score and rank signals
-            print("📈 Step 5: Scoring and ranking...")
-            final_signals = self.score_and_rank_signals(tradeable_signals)
-            
-            # Step 6: Apply signal filters
-            filtered_signals = self.apply_signal_filters(final_signals)
-            
-            print(f"✅ Final signals generated: {len(filtered_signals)}")
+            print(f"✅ Final signals generated: {len(tradeable_signals)}")
             
             # Store signals
-            self.signals = filtered_signals
+            self.signals = tradeable_signals
             
-            return filtered_signals
+            return tradeable_signals
             
         except Exception as e:
             self.logger.error(f"Error generating signals: {str(e)}")
@@ -163,9 +156,17 @@ class SignalGenerator:
                 
                 # Calculate zone age for debugging
                 if hasattr(self, 'data') and self.data is not None:
-                    zone_end_date = self.data.index[zone['end_idx']]
-                    days_ago = (self.data.index[-1] - zone_end_date).days
-                    print(f"   KEPT: {zone_type} zone ({days_ago} days ago)")
+                    try:
+                        # More robust date handling
+                        if zone['end_idx'] < len(self.data):
+                            zone_end_idx = zone['end_idx']
+                            current_idx = len(self.data) - 1
+                            candles_ago = current_idx - zone_end_idx
+                            print(f"   KEPT: {zone_type} zone ({candles_ago} candles ago)")
+                        else:
+                            print(f"   KEPT: {zone_type} zone (recent formation)")
+                    except Exception:
+                        print(f"   KEPT: {zone_type} zone")
         
         print(f"   RESULT: {len(aligned_zones)} zones align with {trend_direction} trend")
         
@@ -226,8 +227,7 @@ class SignalGenerator:
             # Zone Information
             'zone_high': zone['zone_high'],
             'zone_low': zone['zone_low'],
-            'zone_score': self.calculate_zone_score(zone),
-            'zone_strength': zone['strength'],
+            'zone_range': zone['zone_range'],
             
             # Trend Context
             'trend': trend_data['trend_filtered'].iloc[-1],
@@ -236,10 +236,8 @@ class SignalGenerator:
             'ema_100': trend_data['ema_100'].iloc[-1],
             'ema_200': trend_data['ema_200'].iloc[-1],
             
-            # Signal Quality
-            'signal_score': 0,  # Will be calculated in scoring phase
-            'confidence': self.calculate_confidence(zone, trend_data),
-            'priority': 'medium'  # Will be updated in ranking
+            # Signal Quality - Basic information only
+            'signal_type': 'zone_entry'
         }
         
         return signal
@@ -265,170 +263,6 @@ class SignalGenerator:
         
         return entry_price
     
-    def score_and_rank_signals(self, signals: List[Dict]) -> List[Dict]:
-        """
-        Calculate comprehensive signal scores and rank by quality
-        
-        Args:
-            signals: List of signals to score
-            
-        Returns:
-            Scored and ranked signals
-        """
-        for signal in signals:
-            signal['signal_score'] = self.calculate_signal_score(signal)
-            signal['priority'] = self.determine_priority(signal['signal_score'])
-        
-        # Sort by signal score (highest first)
-        signals.sort(key=lambda x: x['signal_score'], reverse=True)
-        
-        return signals
-    
-    def calculate_signal_score(self, signal: Dict) -> float:
-        """
-        Calculate comprehensive signal score (0-100)
-        
-        Args:
-            signal: Signal dictionary
-            
-        Returns:
-            Signal score
-        """
-        # Zone Quality (40% weight)
-        zone_score = signal['zone_score'] * 0.4
-        
-        # Trend Alignment (25% weight)
-        trend_score = self.calculate_trend_alignment_score(signal) * 0.25
-        
-        # Risk/Reward Quality (20% weight)
-        rr_score = min(signal['risk_reward_ratio'] / 3.0, 1.0) * 20  # Cap at 3:1
-        
-        # Entry Method Quality (10% weight)
-        entry_score = self.calculate_entry_score(signal) * 0.10
-        
-        # Trend Strength Bonus (5% weight)
-        strength_score = signal['trend_strength'] * 5
-        
-        total_score = zone_score + (trend_score * 25) + rr_score + (entry_score * 10) + strength_score
-        
-        return min(total_score, 100)  # Cap at 100
-    
-    def calculate_trend_alignment_score(self, signal: Dict) -> float:
-        """Calculate trend alignment quality score"""
-        trend = signal['trend']
-        direction = signal['direction']
-        
-        # Perfect alignment scores
-        if ((direction == 'BUY' and 'bullish' in trend) or 
-            (direction == 'SELL' and 'bearish' in trend)):
-            
-            if 'strong' in trend:
-                return 1.0  # Perfect alignment with strong trend
-            elif 'medium' in trend:
-                return 0.8  # Good alignment with medium trend
-            else:  # weak trend
-                return 0.6  # Acceptable alignment with weak trend
-        
-        return 0.0  # No alignment (shouldn't happen due to filtering)
-    
-    def calculate_entry_score(self, signal: Dict) -> float:
-        """Calculate entry method quality score"""
-        entry_method = signal['entry_method']
-        
-        if entry_method == 'market_entry':
-            return 1.0  # Best entry method
-        elif entry_method == 'limit_entry':
-            return 0.7  # Good entry method
-        else:  # wait_retest
-            return 0.4  # Lower quality entry
-    
-    def determine_priority(self, signal_score: float) -> str:
-        """Determine signal priority based on score"""
-        if signal_score >= 80:
-            return 'high'
-        elif signal_score >= 65:
-            return 'medium'
-        else:
-            return 'low'
-    
-    def apply_signal_filters(self, signals: List[Dict]) -> List[Dict]:
-        """
-        Apply signal filters with RECENCY PRIORITY
-        
-        Args:
-            signals: List of scored signals
-            
-        Returns:
-            Filtered signals prioritizing recent zones
-        """
-        # First filter by minimum score
-        min_score = self.config['quality_thresholds']['min_zone_score']
-        
-        score_filtered = []
-        for signal in signals:
-            if signal['signal_score'] >= min_score:
-                score_filtered.append(signal)
-        
-        print(f"   Signals after score filter (≥{min_score}): {len(score_filtered)}")
-        
-        # CRITICAL: Add recency scoring to prioritize recent zones
-        current_price = score_filtered[0]['zone_high'] if score_filtered else 1.18  # Approximate current price
-        
-        for signal in score_filtered:
-            # Calculate distance from current price (closer = more relevant)
-            zone_center = (signal['zone_high'] + signal['zone_low']) / 2
-            distance_from_current = abs(zone_center - current_price)
-            
-            # Recency bonus: zones closer to current price get priority
-            max_distance = 0.20  # 20 cents max relevant distance
-            distance_factor = max(0, (max_distance - distance_from_current) / max_distance)
-            
-            # Boost signal score for recent/relevant zones
-            signal['recency_bonus'] = distance_factor * 20  # Up to 20 point bonus
-            signal['adjusted_score'] = signal['signal_score'] + signal['recency_bonus']
-        
-        # Sort by ADJUSTED score (includes recency)
-        score_filtered.sort(key=lambda x: x['adjusted_score'], reverse=True)
-        
-        # Optional daily limit
-        if 'max_signals_per_day' in self.config['risk_management']:
-            max_signals = self.config['risk_management']['max_signals_per_day']
-            return score_filtered[:max_signals]
-        
-        # Return top 5 most recent/relevant signals
-        top_signals = score_filtered[:5]
-        
-        print(f"   Final signals after recency filter: {len(top_signals)}")
-        for i, signal in enumerate(top_signals):
-            zone_center = (signal['zone_high'] + signal['zone_low']) / 2
-            distance = abs(zone_center - current_price)
-            print(f"      Signal {i+1}: Score {signal['signal_score']:.1f} + Recency {signal['recency_bonus']:.1f} = {signal['adjusted_score']:.1f} (Distance: {distance:.5f})")
-        
-        return top_signals
-    
-    def calculate_zone_score(self, zone: Dict) -> float:
-        """Calculate zone score (consistent with risk manager)"""
-        return self.risk_manager.calculate_zone_score(zone)
-    
-    def calculate_confidence(self, zone: Dict, trend_data: pd.DataFrame) -> float:
-        """
-        Calculate signal confidence level
-        
-        Args:
-            zone: Zone dictionary
-            trend_data: Trend analysis data
-            
-        Returns:
-            Confidence score (0-1)
-        """
-        zone_confidence = min(zone['strength'], 1.0)
-        trend_confidence = trend_data['ema_separation'].iloc[-1]
-        
-        # Combined confidence
-        overall_confidence = (zone_confidence * 0.6) + (trend_confidence * 0.4)
-        
-        return min(overall_confidence, 1.0)
-    
     def get_signal_summary(self) -> Dict:
         """
         Get summary of generated signals
@@ -439,33 +273,32 @@ class SignalGenerator:
         if not self.signals:
             return {
                 'total_signals': 0,
-                'by_priority': {'high': 0, 'medium': 0, 'low': 0},
                 'by_direction': {'BUY': 0, 'SELL': 0},
-                'avg_score': 0,
+                'by_pattern': {'D-B-D': 0, 'R-B-R': 0, 'D-B-R': 0, 'R-B-D': 0},
                 'avg_risk_reward': 0
             }
         
         total = len(self.signals)
-        
-        # Count by priority
-        priority_counts = {'high': 0, 'medium': 0, 'low': 0}
-        for signal in self.signals:
-            priority_counts[signal['priority']] += 1
         
         # Count by direction
         direction_counts = {'BUY': 0, 'SELL': 0}
         for signal in self.signals:
             direction_counts[signal['direction']] += 1
         
-        # Calculate averages
-        avg_score = sum(s['signal_score'] for s in self.signals) / total
+        # Count by pattern type
+        pattern_counts = {'D-B-D': 0, 'R-B-R': 0, 'D-B-R': 0, 'R-B-D': 0}
+        for signal in self.signals:
+            pattern_type = signal['signal_type']
+            if pattern_type in pattern_counts:
+                pattern_counts[pattern_type] += 1
+        
+        # Calculate average risk/reward
         avg_rr = sum(s['risk_reward_ratio'] for s in self.signals) / total
         
         return {
             'total_signals': total,
-            'by_priority': priority_counts,
             'by_direction': direction_counts,
-            'avg_score': round(avg_score, 1),
+            'by_pattern': pattern_counts,
             'avg_risk_reward': round(avg_rr, 1),
             'signals': self.signals
         }
@@ -502,9 +335,7 @@ class SignalGenerator:
                 # Zone details
                 'zone_high': signal['zone_high'],
                 'zone_low': signal['zone_low'],
-                'zone_score': signal['zone_score'],
-                'signal_score': signal['signal_score'],
-                'priority': signal['priority'],
+                'zone_range': signal['zone_range'],
                 'trend': signal['trend']
             })
         

@@ -122,9 +122,9 @@ class DataLoader:
         existing_renames = {old: new for old, new in rename_map.items() if old in cleaned_data.columns}
         cleaned_data.rename(columns=existing_renames, inplace=True)
         
-        # Convert datetime
+        # Convert datetime with robust format handling
         if 'date' in cleaned_data.columns:
-            cleaned_data['date'] = pd.to_datetime(cleaned_data['date'])
+            cleaned_data['date'] = self._parse_datetime_robust(cleaned_data['date'])
             cleaned_data.set_index('date', inplace=True)
         
         # Convert price columns to numeric
@@ -178,6 +178,74 @@ class DataLoader:
         
         return data
     
+    def _parse_datetime_robust(self, date_series: pd.Series) -> pd.Series:
+        """
+        Robust datetime parsing handling multiple formats:
+        - ISO format: '2024-01-15 09:00:00'
+        - UNIX timestamps: 1642233600
+        - Date only: '2024-01-15'
+        """
+        print("🕐 Parsing datetime with robust format detection...")
+        
+        def parse_single_date(date_val):
+            if pd.isna(date_val):
+                return pd.NaT
+            
+            # Convert to string for processing
+            date_str = str(date_val).strip()
+            
+            # Try UNIX timestamp first (all digits)
+            if date_str.replace('.', '').isdigit():
+                try:
+                    # Handle both seconds and milliseconds timestamps
+                    timestamp = float(date_str)
+                    if timestamp > 1e10:  # Milliseconds
+                        timestamp = timestamp / 1000
+                    return pd.to_datetime(timestamp, unit='s')
+                except (ValueError, OSError):
+                    pass
+            
+            # Try standard pandas parsing for ISO formats
+            try:
+                return pd.to_datetime(date_str)
+            except (ValueError, TypeError):
+                pass
+            
+            # Try specific format patterns
+            format_patterns = [
+                '%Y-%m-%d %H:%M:%S',
+                '%Y-%m-%d',
+                '%Y.%m.%d %H:%M:%S',
+                '%Y.%m.%d',
+                '%m/%d/%Y %H:%M:%S',
+                '%m/%d/%Y'
+            ]
+            
+            for pattern in format_patterns:
+                try:
+                    return pd.to_datetime(date_str, format=pattern)
+                except (ValueError, TypeError):
+                    continue
+            
+            # If all fails, return NaT
+            print(f"⚠️  Could not parse date: {date_str}")
+            return pd.NaT
+        
+        # Apply robust parsing
+        parsed_dates = date_series.apply(parse_single_date)
+        
+        # Validate results
+        successful_parses = parsed_dates.notna().sum()
+        total_dates = len(date_series)
+        success_rate = (successful_parses / total_dates) * 100
+        
+        print(f"   ✅ Parsed {successful_parses}/{total_dates} dates ({success_rate:.1f}% success)")
+        
+        if success_rate < 95:
+            print(f"   ⚠️  Low success rate - check date formats in source data")
+        
+        return parsed_dates
+
     def validate_data_quality(self, data: pd.DataFrame) -> bool:
         """
         Validate data quality and completeness (RELAXED for real-world data)
