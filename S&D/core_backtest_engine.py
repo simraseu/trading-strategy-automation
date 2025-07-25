@@ -19,13 +19,7 @@ from multiprocessing import Pool, cpu_count
 import psutil
 import warnings
 import glob
-import matplotlib.pyplot as plt
-import seaborn as sns
 warnings.filterwarnings('ignore')
-
-# Set professional styling for charts
-plt.style.use('default')
-sns.set_palette("husl")
 
 # Import your 100% updated modules
 from modules.data_loader import DataLoader
@@ -804,265 +798,6 @@ class CoreBacktestEngine:
         
         return memory_gb >= 4  # Minimum 4GB required
     
-    # ============================================================================
-    # VISUALIZATION & ANALYSIS METHODS - INTEGRATED
-    # ============================================================================
-    
-    def create_comprehensive_analysis_charts(self, result: Dict, save_charts: bool = True) -> Optional[str]:
-        """
-        Create comprehensive analysis with multiple charts for a single strategy result
-        INTEGRATED: Part of the core engine for complete analysis
-        """
-        if result['total_trades'] == 0:
-            print(f"⚠️  No trades to visualize for {result['pair']} {result['timeframe']}")
-            return None
-        
-        print(f"📊 Creating comprehensive charts for {result['pair']} {result['timeframe']}...")
-        
-        # Professional color scheme
-        colors = {
-            'equity': '#2E8B57',      # Sea Green
-            'drawdown': '#DC143C',    # Crimson
-            'wins': '#32CD32',        # Lime Green
-            'losses': '#FF6347',      # Tomato
-            'breakeven': '#FFD700'    # Gold
-        }
-        
-        # Create figure with subplots
-        fig = plt.figure(figsize=(20, 16))
-        
-        # Main title
-        pair_tf = f"{result['pair']} {result['timeframe']}"
-        fig.suptitle(f'Comprehensive Analysis: {pair_tf}\n'
-                    f'Trades: {result["total_trades"]} | Win Rate: {result["win_rate"]:.1f}% | '
-                    f'Profit Factor: {result["profit_factor"]:.2f} | Return: {result["total_return"]:.1f}%',
-                    fontsize=16, fontweight='bold', y=0.95)
-        
-        # Chart 1: Equity Curve (Top Left)
-        ax1 = plt.subplot(2, 2, 1)
-        self.plot_equity_curve(result, ax1, colors)
-        
-        # Chart 2: Drawdown Analysis (Top Right)
-        ax2 = plt.subplot(2, 2, 2)
-        self.plot_drawdown_analysis(result, ax2, colors)
-        
-        # Chart 3: Trade Distribution (Bottom Left)
-        ax3 = plt.subplot(2, 2, 3)
-        self.plot_trade_distribution(result, ax3, colors)
-        
-        # Chart 4: Performance Metrics (Bottom Right)
-        ax4 = plt.subplot(2, 2, 4)
-        self.plot_performance_metrics(result, ax4, colors)
-        
-        plt.tight_layout()
-        
-        # Save chart if requested
-        filename = None
-        if save_charts:
-            os.makedirs('results/charts', exist_ok=True)
-            timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-            filename = f"results/charts/{pair_tf.replace(' ', '_')}_comprehensive_{timestamp}.png"
-            plt.savefig(filename, dpi=300, bbox_inches='tight', facecolor='white')
-            print(f"✅ Chart saved: {filename}")
-        
-        plt.show()
-        return filename
-    
-    def plot_equity_curve(self, result: Dict, ax, colors: Dict):
-        """Plot equity curve with trade markers"""
-        trades = result['trades']
-        if not trades:
-            ax.text(0.5, 0.5, 'No trades to display', ha='center', va='center', transform=ax.transAxes)
-            return
-        
-        # Calculate equity curve
-        equity_data = self.calculate_equity_curve(trades)
-        
-        # Plot equity curve
-        ax.plot(equity_data['trade_number'], equity_data['equity'], 
-               color=colors['equity'], linewidth=3, label='Equity Curve')
-        
-        # Add trade markers
-        wins = equity_data[equity_data['trade_result'] == 'WIN']
-        losses = equity_data[equity_data['trade_result'] == 'LOSS']
-        breakevens = equity_data[equity_data['trade_result'] == 'BREAKEVEN']
-        
-        if len(wins) > 0:
-            ax.scatter(wins['trade_number'], wins['equity'], 
-                      color=colors['wins'], s=60, marker='^', 
-                      label=f'Wins ({len(wins)})', alpha=0.8, zorder=5)
-        
-        if len(losses) > 0:
-            ax.scatter(losses['trade_number'], losses['equity'], 
-                      color=colors['losses'], s=60, marker='v', 
-                      label=f'Losses ({len(losses)})', alpha=0.8, zorder=5)
-        
-        if len(breakevens) > 0:
-            ax.scatter(breakevens['trade_number'], breakevens['equity'], 
-                      color=colors['breakeven'], s=60, marker='o', 
-                      label=f'Breakevens ({len(breakevens)})', alpha=0.8, zorder=5)
-        
-        # Add horizontal line at starting equity
-        ax.axhline(y=10000, color='gray', linestyle='--', alpha=0.6, label='Starting Balance')
-        
-        ax.set_title('Equity Curve', fontweight='bold', fontsize=14)
-        ax.set_xlabel('Trade Number')
-        ax.set_ylabel('Account Balance ($)')
-        ax.legend(loc='best')
-        ax.grid(True, alpha=0.3)
-        
-        # Format y-axis as currency
-        ax.yaxis.set_major_formatter(plt.FuncFormatter(lambda x, p: f'${x:,.0f}'))
-    
-    def plot_drawdown_analysis(self, result: Dict, ax, colors: Dict):
-        """Plot drawdown analysis"""
-        trades = result['trades']
-        if not trades:
-            ax.text(0.5, 0.5, 'No trades to display', ha='center', va='center', transform=ax.transAxes)
-            return
-        
-        # Calculate drawdown
-        equity_data = self.calculate_equity_curve(trades)
-        drawdown_data = self.calculate_drawdown(equity_data)
-        
-        # Plot drawdown
-        ax.fill_between(drawdown_data['trade_number'], drawdown_data['drawdown_pct'], 0,
-                       color=colors['drawdown'], alpha=0.6, label='Drawdown %')
-        
-        # Add max drawdown line and annotation
-        max_dd = drawdown_data['drawdown_pct'].min()
-        max_dd_idx = drawdown_data['drawdown_pct'].idxmin()
-        ax.axhline(y=max_dd, color='red', linestyle='--', alpha=0.8)
-        ax.annotate(f'Max DD: {max_dd:.1f}%', 
-                   xy=(drawdown_data.iloc[max_dd_idx]['trade_number'], max_dd),
-                   xytext=(10, 10), textcoords='offset points',
-                   bbox=dict(boxstyle='round,pad=0.3', facecolor='white', alpha=0.8),
-                   arrowprops=dict(arrowstyle='->', color='red'))
-        
-        ax.set_title('Drawdown Analysis', fontweight='bold', fontsize=14)
-        ax.set_xlabel('Trade Number')
-        ax.set_ylabel('Drawdown (%)')
-        ax.legend(loc='best')
-        ax.grid(True, alpha=0.3)
-        
-        # Invert y-axis so drawdowns go down
-        ax.invert_yaxis()
-    
-    def plot_trade_distribution(self, result: Dict, ax, colors: Dict):
-        """Plot trade P&L distribution"""
-        trades = result['trades']
-        if not trades:
-            ax.text(0.5, 0.5, 'No trades to display', ha='center', va='center', transform=ax.transAxes)
-            return
-        
-        # Get P&L values
-        pnl_values = [trade['pnl'] for trade in trades]
-        
-        # Create histogram
-        ax.hist(pnl_values, bins=min(15, len(pnl_values)//2 + 1), 
-               alpha=0.7, color=colors['equity'], edgecolor='black')
-        
-        # Add vertical lines for mean and median
-        mean_pnl = np.mean(pnl_values)
-        median_pnl = np.median(pnl_values)
-        
-        ax.axvline(mean_pnl, color='red', linestyle='--', linewidth=2, label=f'Mean: ${mean_pnl:.0f}')
-        ax.axvline(median_pnl, color='blue', linestyle='--', linewidth=2, label=f'Median: ${median_pnl:.0f}')
-        ax.axvline(0, color='black', linestyle='-', alpha=0.3, label='Breakeven')
-        
-        ax.set_title('Trade P&L Distribution', fontweight='bold', fontsize=14)
-        ax.set_xlabel('Trade P&L ($)')
-        ax.set_ylabel('Frequency')
-        ax.legend(loc='best')
-        ax.grid(True, alpha=0.3)
-    
-    def plot_performance_metrics(self, result: Dict, ax, colors: Dict):
-        """Plot key performance metrics as a table/visualization"""
-        # Key metrics to display
-        metrics = {
-            'Total Trades': result['total_trades'],
-            'Win Rate': f"{result['win_rate']:.1f}%",
-            'Profit Factor': f"{result['profit_factor']:.2f}",
-            'Total Return': f"{result['total_return']:.1f}%",
-            'Gross Profit': f"${result['gross_profit']:.0f}",
-            'Gross Loss': f"${result['gross_loss']:.0f}",
-            'Average Duration': f"{result.get('avg_trade_duration', 0):.1f} days",
-            'Leg-out Threshold': f"{result['leg_out_threshold']}x"
-        }
-        
-        # Calculate additional metrics
-        if result['trades']:
-            trades = result['trades']
-            winning_trades = [t for t in trades if t['pnl'] > 0]
-            losing_trades = [t for t in trades if t['pnl'] < 0]
-            
-            avg_win = np.mean([t['pnl'] for t in winning_trades]) if winning_trades else 0
-            avg_loss = np.mean([abs(t['pnl']) for t in losing_trades]) if losing_trades else 0
-            
-            metrics['Average Win'] = f"${avg_win:.0f}"
-            metrics['Average Loss'] = f"${avg_loss:.0f}"
-            
-            # Calculate max drawdown
-            equity_data = self.calculate_equity_curve(trades)
-            drawdown_data = self.calculate_drawdown(equity_data)
-            max_dd = drawdown_data['drawdown_pct'].min()
-            metrics['Max Drawdown'] = f"{max_dd:.1f}%"
-        
-        # Create table visualization
-        ax.axis('off')  # Turn off axis
-        
-        # Create table data
-        table_data = []
-        for metric, value in metrics.items():
-            table_data.append([metric, value])
-        
-        # Create table
-        table = ax.table(cellText=table_data,
-                        colLabels=['Metric', 'Value'],
-                        cellLoc='left',
-                        loc='center',
-                        colWidths=[0.6, 0.4])
-        
-        # Style the table
-        table.auto_set_font_size(False)
-        table.set_fontsize(11)
-        table.scale(1, 2)
-        
-        # Color code the cells
-        for i in range(len(table_data)):
-            if 'Profit Factor' in table_data[i][0]:
-                if result['profit_factor'] >= 2.0:
-                    table[(i+1, 1)].set_facecolor('#90EE90')  # Light green
-                elif result['profit_factor'] >= 1.5:
-                    table[(i+1, 1)].set_facecolor('#FFFFE0')  # Light yellow
-                else:
-                    table[(i+1, 1)].set_facecolor('#FFB6C1')  # Light red
-            elif 'Win Rate' in table_data[i][0]:
-                if result['win_rate'] >= 50:
-                    table[(i+1, 1)].set_facecolor('#90EE90')  # Light green
-                elif result['win_rate'] >= 35:
-                    table[(i+1, 1)].set_facecolor('#FFFFE0')  # Light yellow
-                else:
-                    table[(i+1, 1)].set_facecolor('#FFB6C1')  # Light red
-        
-        ax.set_title('Performance Metrics', fontweight='bold', fontsize=14)
-    
-    def calculate_equity_curve(self, trades: List[Dict]) -> pd.DataFrame:
-        """Calculate equity curve from trades"""
-        equity_data = []
-        current_equity = 10000  # Starting balance
-        
-        for i, trade in enumerate(trades, 1):
-            current_equity += trade['pnl']
-            equity_data.append({
-                'trade_number': i,
-                'equity': current_equity,
-                'trade_pnl': trade['pnl'],
-                'trade_result': trade['result']
-            })
-        
-        return pd.DataFrame(equity_data)
-    
     def calculate_drawdown(self, equity_data: pd.DataFrame) -> pd.DataFrame:
         """Calculate drawdown analysis"""
         equity_data = equity_data.copy()
@@ -1155,13 +890,13 @@ def main():
     choice = input("\nEnter choice (1-4): ").strip()
     
     if choice == '1':
-        # Quick validation test WITH CHARTS
-        print("\n🧪 COMPREHENSIVE VALIDATION TEST:")
-        print("Testing EURUSD 3D with updated 2.5x threshold + CHARTS...")
+        # Quick validation test
+        print("\n🧪 QUICK VALIDATION TEST:")
+        print("Testing EURUSD 3D with updated 2.5x threshold...")
         
-        result = engine.run_single_test_with_charts('EURUSD', '3D', 730)
+        result = engine.run_single_strategy_test('EURUSD', '3D', 730)
         
-        print(f"\n📊 COMPREHENSIVE TEST RESULTS:")
+        print(f"\n📊 TEST RESULTS:")
         print(f"   Pair: {result['pair']} {result['timeframe']}")
         print(f"   Trades: {result['total_trades']}")
         print(f"   Win Rate: {result['win_rate']:.1f}%")
@@ -1172,9 +907,7 @@ def main():
         if result['total_trades'] == 0:
             print(f"   Issue: {result['description']}")
         else:
-            print(f"   ✅ COMPREHENSIVE VALIDATION SUCCESSFUL!")
-            if result.get('chart_file'):
-                print(f"   📊 Charts created: {result['chart_file']}")
+            print(f"   ✅ VALIDATION SUCCESSFUL - Engine working with updated modules!")
     
     elif choice == '2':
         # Comprehensive analysis - Priority 1
@@ -1210,7 +943,7 @@ def main():
         
         try:
             days_back = int(days_back)
-            result = engine.run_single_test_with_charts(pair, timeframe, days_back)
+            result = engine.run_single_strategy_test(pair, timeframe, days_back)
             
             print(f"\n📊 CUSTOM TEST RESULTS:")
             print(f"   Pair: {result['pair']} {result['timeframe']}")
