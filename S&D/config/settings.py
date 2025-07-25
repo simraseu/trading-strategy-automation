@@ -16,8 +16,8 @@ CANDLE_THRESHOLDS = {
 ZONE_PARAMETERS = {
     'max_base_candles': 6,        # Maximum base candles (1-6 range)
     'ideal_base_candles': 3,      # Sweet spot (1-3 highest probability)
-    'min_leg_out_ratio': 1.5,     # Leg-out must be 2x base size
-    'min_leg_strength': 2         # Minimum decisive/explosive candles in leg
+    'min_leg_out_ratio': 2.5,     # Leg-out must be 2x base size
+    'min_leg_strength': 1         # Minimum decisive/explosive candles in leg
 }
 
 # DATA SETTINGS - ADAPTED FOR YOUR FILE STRUCTURE
@@ -69,8 +69,8 @@ VALIDATION = {
 ZONE_PARAMETERS = {
     'max_base_candles': 6,        # Maximum base candles (1-6 range)
     'ideal_base_candles': 3,      # Sweet spot (1-3 highest probability)
-    'min_leg_out_ratio': 2.0,     # Leg-out must be 2.0x base size 
-    'min_leg_strength': 2         # Minimum decisive/explosive candles in leg
+    'min_leg_out_ratio': 2.5,     # Leg-out must be 2.0x base size 
+    'min_leg_strength': 1         # Minimum decisive/explosive candles in leg
 }
 
 # ZONE DETECTION SETTINGS - FIXED
@@ -78,8 +78,8 @@ ZONE_CONFIG = {
     'min_base_candles': 1,
     'max_base_candles': 6,
     'optimal_base_candles': 3,
-    'min_legout_ratio': 2.0,      # 2.0x minimum ratio requirement
-    'min_leg_strength': 0.5,
+    'min_legout_ratio': 2.5,      # 2.0x minimum ratio requirement
+    'min_leg_strength': 1,
     'max_base_retracement': 0.3,
     'min_pattern_pips': 10,
     'pip_value': 0.0001,

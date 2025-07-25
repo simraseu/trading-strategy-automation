@@ -139,7 +139,7 @@ class RiskManager:
                 'stop_distance_pips': stop_distance_pips,
                 'take_profit_1': take_profits['tp1'],  # 1:1 break-even
                 'take_profit_2': take_profits['tp2'],  # 1:2 final target
-                'risk_reward_ratio': 2.0,
+                'risk_reward_ratio': 2.5,
                 'entry_method': 'manual_strategy',
                 'trade_direction': 'BUY' if zone['type'] == 'R-B-R' else 'SELL'
             }
@@ -177,15 +177,15 @@ class RiskManager:
         return entry_price
 
     def calculate_take_profits_manual(self, entry_price: float, stop_loss_price: float, zone_type: str) -> Dict:
-        """Your 1:1 and 1:2 take profit method"""
+        """Your 1:1 and 1:2.5 take profit method"""
         risk_distance = abs(entry_price - stop_loss_price)
         
         if zone_type == 'R-B-R':  # BUY trade
-            tp1 = entry_price + risk_distance      # 1:1 (break-even move)
-            tp2 = entry_price + (risk_distance * 2) # 1:2 (final target)
+            tp1 = entry_price + risk_distance        # 1:1 (break-even move)
+            tp2 = entry_price + (risk_distance * 2.5) # 1:2.5 (final target)
         else:  # SELL trade
-            tp1 = entry_price - risk_distance      # 1:1 (break-even move)
-            tp2 = entry_price - (risk_distance * 2) # 1:2 (final target)
+            tp1 = entry_price - risk_distance        # 1:1 (break-even move)
+            tp2 = entry_price - (risk_distance * 2.5) # 1:2.5 (final target)
         
         return {
             'tp1': tp1,
@@ -316,55 +316,6 @@ class RiskManager:
         pip_value_usd = self.get_pip_value_usd(pair)
         return stop_distance_pips * pip_value_usd * position_size
     
-    def determine_entry_method(self, zone: Dict) -> str:
-        """
-        Determine best entry method for the zone
-        
-        Args:
-            zone: Zone dictionary
-            
-        Returns:
-            Entry method string
-        """
-        zone_score = self.calculate_zone_score(zone)
-        
-        if zone_score >= 80:
-            return 'market_entry'  # High quality - enter at market
-        elif zone_score >= 65:
-            return 'limit_entry'   # Medium quality - use limit order
-        else:
-            return 'wait_retest'   # Lower quality - wait for retest
-    
-    def calculate_zone_score(self, zone: Dict) -> float:
-        """
-        Calculate zone quality score (same as visualizer for consistency)
-        
-        Args:
-            zone: Zone dictionary
-            
-        Returns:
-            Zone score (0-100)
-        """
-        # Base scoring components
-        leg_in_score = zone['leg_in']['strength'] * 20      # 0-20 points
-        base_score = zone['base']['quality_score'] * 30     # 0-30 points  
-        leg_out_score = zone['leg_out']['strength'] * 25    # 0-25 points
-        
-        # Distance bonus (most important for momentum)
-        distance_ratio = zone['leg_out']['ratio_to_base']
-        distance_score = min(distance_ratio / 2.0, 1.0) * 20  # 0-20 points
-        
-        # Base candle bonus (1-2 candles optimal)
-        base_candles = zone['base']['candle_count']
-        if base_candles <= 2:
-            base_bonus = 5
-        elif base_candles == 3:
-            base_bonus = 3
-        else:
-            base_bonus = 0
-            
-        total_score = leg_in_score + base_score + leg_out_score + distance_score + base_bonus
-        return min(total_score, 100)  # Cap at 100
     
     def update_account_balance(self, pnl: float):
         """
