@@ -397,6 +397,122 @@ class ZoneDetector:
             return end_price < start_price
     
     
+    def check_zone_testing(self, zone: Dict, data: pd.DataFrame, 
+                          evaluation_date: Optional[pd.Timestamp] = None) -> Tuple[bool, str]:
+        """
+        Check if zone was valid at specific point in time with CORRECT approach direction logic
+        
+        Args:
+            zone: Zone dictionary with zone boundaries and formation indices
+            data: Full OHLC DataFrame with date index
+            evaluation_date: Specific date to check validity up to. If None, uses current moment
+            
+        Returns:
+            Tuple of (is_valid: bool, reason: str)
+            - is_valid: True if zone was untested up to evaluation_date
+            - reason: Explanation of validation result
+            
+        CORRECT LOGIC:
+        - Demand zones: Only test when price approaches FROM BELOW and penetrates UP
+        - Supply zones: Only test when price approaches FROM ABOVE and penetrates DOWN
+        """
+        try:
+            zone_end_idx = zone['end_idx']
+            zone_high = zone['zone_high']
+            zone_low = zone['zone_low']
+            zone_size = zone_high - zone_low
+            zone_type = zone['type']
+            
+            # Edge case: Zero zone size
+            if zone_size <= 0:
+                return False, "Invalid zone - zero or negative size"
+            
+            # Determine evaluation cutoff point
+            if evaluation_date is None:
+                end_check_idx = len(data) - 1
+                cutoff_date = data.index[-1]
+            else:
+                try:
+                    end_check_idx = data.index.get_loc(evaluation_date)
+                    cutoff_date = evaluation_date
+                except KeyError:
+                    return False, f"Evaluation date {evaluation_date} not found in data"
+            
+            # Edge case: No data after zone formation to check
+            if zone_end_idx >= end_check_idx:
+                return True, "Zone untested - no data between formation and evaluation point"
+            
+            # Check candles from zone end to evaluation cutoff
+            start_check_idx = zone_end_idx + 1
+            candles_to_check = data.iloc[start_check_idx:end_check_idx + 1]
+            
+            if len(candles_to_check) == 0:
+                return True, "Zone untested - no candles in evaluation window"
+            
+            # CORRECTED LOGIC: Check approach direction before applying penetration rules
+            for i, (date_idx, candle) in enumerate(candles_to_check.iterrows()):
+                
+                if zone_type in ['R-B-R', 'D-B-R']:  # Demand zones (expect bullish approach)
+                    
+                    # DEMAND ZONE LOGIC: Only test if price is approaching from below
+                    # Price must be in or near the zone to trigger testing
+                    
+                    # Check if price is approaching the zone from below (bullish approach)
+                    is_approaching_from_below = (
+                        candle['low'] <= zone_high and  # Price reached zone level
+                        candle['close'] >= zone_low     # Close is at or above zone bottom
+                    )
+                    
+                    if is_approaching_from_below:
+                        # Rule 1: 33% close penetration from TOP of zone
+                        close_test_level = zone_high - (zone_size * 0.33)
+                        if candle['close'] < close_test_level:
+                            return False, f"Demand zone tested on {date_idx.strftime('%Y-%m-%d')} - close {candle['close']:.5f} below 33% level {close_test_level:.5f}"
+                        
+                        # Rule 2: 50% wick penetration from TOP of zone
+                        wick_test_level = zone_high - (zone_size * 0.50)
+                        if candle['low'] < wick_test_level:
+                            return False, f"Demand zone deeply penetrated on {date_idx.strftime('%Y-%m-%d')} - low {candle['low']:.5f} below 50% level {wick_test_level:.5f}"
+                    
+                    # If price is completely below zone, ignore (not approaching)
+                    # This fixes the bug where low prices were invalidating demand zones
+                        
+                elif zone_type in ['D-B-D', 'R-B-D']:  # Supply zones (expect bearish approach)
+                    
+                    # SUPPLY ZONE LOGIC: Only test if price is approaching from above
+                    # Price must be in or near the zone to trigger testing
+                    
+                    # Check if price is approaching the zone from above (bearish approach)
+                    is_approaching_from_above = (
+                        candle['high'] >= zone_low and   # Price reached zone level
+                        candle['close'] <= zone_high     # Close is at or below zone top
+                    )
+                    
+                    if is_approaching_from_above:
+                        # Rule 1: 33% close penetration from BOTTOM of zone
+                        close_test_level = zone_low + (zone_size * 0.33)
+                        if candle['close'] > close_test_level:
+                            return False, f"Supply zone tested on {date_idx.strftime('%Y-%m-%d')} - close {candle['close']:.5f} above 33% level {close_test_level:.5f}"
+                        
+                        # Rule 2: 50% wick penetration from BOTTOM of zone
+                        wick_test_level = zone_low + (zone_size * 0.50)
+                        if candle['high'] > wick_test_level:
+                            return False, f"Supply zone deeply penetrated on {date_idx.strftime('%Y-%m-%d')} - high {candle['high']:.5f} above 50% level {wick_test_level:.5f}"
+                    
+                    # If price is completely above zone, ignore (not approaching)
+                
+                else:
+                    return False, f"Unknown zone type: {zone_type}"
+            
+            # Zone was valid throughout the evaluation period
+            return True, f"Zone untested from formation to {cutoff_date.strftime('%Y-%m-%d')} ({len(candles_to_check)} candles checked)"
+            
+        except KeyError as e:
+            return False, f"Missing zone data: {str(e)}"
+        except Exception as e:
+            self.logger.error(f"Error in zone testing validation: {str(e)}")
+            return False, f"Validation error: {str(e)}"
+    
     def validate_data(self, data: pd.DataFrame) -> None:
         """Validate input data"""
         required_columns = ['open', 'high', 'low', 'close']
