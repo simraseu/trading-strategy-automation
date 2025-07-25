@@ -83,7 +83,7 @@ class CoreBacktestEngine:
         # CPU optimization
         available_cores = cpu_count()
         if available_cores >= 12:  # Hyperthreaded 6-core
-            self.max_workers = 9  # Leave 2 threads for system
+            self.max_workers = 8  
         elif available_cores >= 6:
             self.max_workers = available_cores - 1
         else:
