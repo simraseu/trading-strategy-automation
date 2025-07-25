@@ -259,12 +259,11 @@ class ZoneDetector:
                 leg_range = leg_data['high'].max() - leg_data['low'].min()
                 
                 return {
-                    'start_idx': start_idx,
-                    'end_idx': end_idx,
-                    'direction': direction,
-                    'range': leg_range,
-                    'strength': self.calculate_leg_strength(leg_data, direction),
-                    'candle_count': leg_length
+                'start_idx': start_idx,
+                'end_idx': end_idx,
+                'direction': direction,
+                'range': leg_range,
+                'candle_count': leg_length
                 }
         
         return None
@@ -313,8 +312,7 @@ class ZoneDetector:
             'high': base_high,
             'low': base_low,
             'range': base_range,
-            'candle_count': len(consecutive_base_indices),
-            'quality_score': self.calculate_base_quality(len(consecutive_base_indices))
+            'candle_count': len(consecutive_base_indices)
         }
     
     def identify_leg_out(self, data: pd.DataFrame, start_idx: int, 
@@ -358,22 +356,18 @@ class ZoneDetector:
                     'direction': direction,
                     'range': leg_range,
                     'ratio_to_base': ratio_to_base,
-                    'strength': self.calculate_leg_strength(leg_data, direction),
                     'candle_count': leg_length
                 }
         
         return None
     
     def create_pattern(self, pattern_type: str, leg_in: Dict, 
-                      base_sequence: Dict, leg_out: Dict) -> Dict:
+                  base_sequence: Dict, leg_out: Dict) -> Dict:
         """Create complete pattern with zone boundaries"""
         # Zone boundaries = base candle boundaries
         zone_high = base_sequence['high']
         zone_low = base_sequence['low']
         zone_range = zone_high - zone_low
-        
-        # Calculate pattern strength
-        strength = self.calculate_pattern_strength(leg_in, base_sequence, leg_out)
         
         return {
             'type': pattern_type,
@@ -385,7 +379,6 @@ class ZoneDetector:
             'zone_high': zone_high,
             'zone_low': zone_low,
             'zone_range': zone_range,
-            'strength': strength,
             'formation_date': None  # Will be set by caller if needed
         }
     
@@ -403,51 +396,6 @@ class ZoneDetector:
         else:  # bearish
             return end_price < start_price
     
-    def calculate_leg_strength(self, leg_data: pd.DataFrame, direction: str) -> float:
-        """Calculate leg strength based on candle types"""
-        if len(leg_data) == 0:
-            return 0.0
-        
-        strong_candles = 0
-        
-        for _, candle in leg_data.iterrows():
-            classification = self.candle_classifier.classify_single_candle(
-                candle['open'], candle['high'], candle['low'], candle['close']
-            )
-            
-            if classification in ['decisive', 'explosive']:
-                strong_candles += 1
-        
-        return strong_candles / len(leg_data)
-    
-    def calculate_base_quality(self, candle_count: int) -> float:
-        """Calculate base quality score (favor shorter bases)"""
-        if candle_count == 1:
-            return 1.0
-        elif candle_count == 2:
-            return 0.9
-        elif candle_count == 3:
-            return 0.7
-        else:
-            return 0.5
-    
-    def calculate_pattern_strength(self, leg_in: Dict, base_sequence: Dict, leg_out: Dict) -> float:
-        """Calculate overall pattern strength"""
-        leg_in_strength = leg_in['strength']
-        base_quality = base_sequence['quality_score']
-        leg_out_strength = leg_out['strength']
-        leg_out_ratio = leg_out['ratio_to_base']
-        
-        # Weighted calculation with distance priority
-        base_bonus = 1.0 if base_sequence['candle_count'] <= 2 else 0.8 if base_sequence['candle_count'] <= 3 else 0.6
-        ratio_bonus = min(leg_out_ratio / 2.0, 1.0)  # Cap at 2x for bonus
-        
-        strength = (leg_in_strength * 0.25 + 
-                   base_quality * 0.25 + 
-                   leg_out_strength * 0.25 + 
-                   ratio_bonus * 0.25) * base_bonus
-        
-        return round(strength, 3)
     
     def validate_data(self, data: pd.DataFrame) -> None:
         """Validate input data"""
