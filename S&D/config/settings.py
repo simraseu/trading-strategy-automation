@@ -24,7 +24,7 @@ DATA_SETTINGS = {
 # FILE PATHS - CROSS-PLATFORM COMPATIBLE
 # Auto-detect project root directory
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BASE_DIR = os.path.join(PROJECT_ROOT, 'S&D')
+BASE_DIR = PROJECT_ROOT  
 
 PATHS = {
     'raw_data': os.path.join(BASE_DIR, 'Data', 'raw'),
@@ -111,7 +111,7 @@ RISK_CONFIG = {
         'round_to_level': False        # Round to psychological levels
     },
     'take_profit_rules': {
-        'risk_reward_ratio': 2.0,      # Minimum 1:2 RR
+        'risk_reward_ratio': 2.5,      # Minimum 1:2 RR
         'scale_out_enabled': False,     # Take partial profits
         'scale_levels': [1.0, 2.0, 3.0], # 1R, 2R, 3R exits
         'scale_percentages': [33, 33, 34] # % of position to close
