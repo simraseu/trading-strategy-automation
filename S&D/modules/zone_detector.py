@@ -452,30 +452,53 @@ class ZoneDetector:
             # CORRECTED LOGIC: Check approach direction before applying penetration rules
             for i, (date_idx, candle) in enumerate(candles_to_check.iterrows()):
                 
-                if zone_type in ['R-B-R', 'D-B-R']:  # Demand zones (expect bullish approach)
+                if zone_type in ['R-B-R', 'D-B-R']:  # Demand zones (expect approach from ABOVE)
                     
-                    # DEMAND ZONE LOGIC: Only test if price is approaching from below
-                    # Price must be in or near the zone to trigger testing
+                    # CORRECTED DEMAND ZONE LOGIC: Price approaches from ABOVE (same direction as formation)
+                    # Demand zones formed by upward leg-out → Price returns from above
                     
-                    # Check if price is approaching the zone from below (bullish approach)
+                    # Check if price is approaching the zone from above (correct direction)
+                    is_approaching_from_above = (
+                        candle['high'] >= zone_low and   # Price reached zone level from above
+                        candle['close'] <= zone_high     # Close is at or below zone top
+                    )
+                    
+                    if is_approaching_from_above:
+                        # Rule 1: 33% close penetration from BOTTOM of zone (entry point)
+                        close_test_level = zone_low + (zone_size * 0.33)
+                        if candle['close'] < close_test_level:
+                            return False, f"Demand zone tested on {date_idx.strftime('%Y-%m-%d')} - close {candle['close']:.5f} below 33% level {close_test_level:.5f}"
+                        
+                        # Rule 2: 50% wick penetration from BOTTOM of zone
+                        wick_test_level = zone_low + (zone_size * 0.50)
+                        if candle['low'] < wick_test_level:
+                            return False, f"Demand zone deeply penetrated on {date_idx.strftime('%Y-%m-%d')} - low {candle['low']:.5f} below 50% level {wick_test_level:.5f}"
+                    
+                    # If price is completely above zone, ignore (not yet approaching)
+                        
+                elif zone_type in ['D-B-D', 'R-B-D']:  # Supply zones (expect approach from BELOW)
+                    
+                    # CORRECTED SUPPLY ZONE LOGIC: Price approaches from BELOW (same direction as formation)
+                    # Supply zones formed by downward leg-out → Price returns from below
+                    
+                    # Check if price is approaching the zone from below (correct direction)
                     is_approaching_from_below = (
-                        candle['low'] <= zone_high and  # Price reached zone level
+                        candle['low'] <= zone_high and  # Price reached zone level from below
                         candle['close'] >= zone_low     # Close is at or above zone bottom
                     )
                     
                     if is_approaching_from_below:
-                        # Rule 1: 33% close penetration from TOP of zone
+                        # Rule 1: 33% close penetration from TOP of zone (entry point)
                         close_test_level = zone_high - (zone_size * 0.33)
-                        if candle['close'] < close_test_level:
-                            return False, f"Demand zone tested on {date_idx.strftime('%Y-%m-%d')} - close {candle['close']:.5f} below 33% level {close_test_level:.5f}"
+                        if candle['close'] > close_test_level:
+                            return False, f"Supply zone tested on {date_idx.strftime('%Y-%m-%d')} - close {candle['close']:.5f} above 33% level {close_test_level:.5f}"
                         
                         # Rule 2: 50% wick penetration from TOP of zone
                         wick_test_level = zone_high - (zone_size * 0.50)
-                        if candle['low'] < wick_test_level:
-                            return False, f"Demand zone deeply penetrated on {date_idx.strftime('%Y-%m-%d')} - low {candle['low']:.5f} below 50% level {wick_test_level:.5f}"
+                        if candle['high'] > wick_test_level:
+                            return False, f"Supply zone deeply penetrated on {date_idx.strftime('%Y-%m-%d')} - high {candle['high']:.5f} above 50% level {wick_test_level:.5f}"
                     
-                    # If price is completely below zone, ignore (not approaching)
-                    # This fixes the bug where low prices were invalidating demand zones
+                    # If price is completely below zone, ignore (not yet approaching)
                         
                 elif zone_type in ['D-B-D', 'R-B-D']:  # Supply zones (expect bearish approach)
                     

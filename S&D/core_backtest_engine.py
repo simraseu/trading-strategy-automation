@@ -320,36 +320,37 @@ class CoreBacktestEngine:
     
     def execute_single_realistic_trade(self, zone: Dict, data: pd.DataFrame, current_idx: int) -> Optional[Dict]:
         """
-        Execute single trade with REALISTIC 1R→2.5R management
-        Uses UPDATED risk management from your modules
+        Execute single trade using REALISTIC 1R→2.5R management
+        CORRECTED: Fixed zone approach direction logic
         """
         zone_high = zone['zone_high']
         zone_low = zone['zone_low']
         zone_range = zone_high - zone_low
         
-        # Entry and stop logic for ALL pattern types
-        if zone['type'] in ['R-B-R', 'D-B-R']:  # Demand zones (buy)
-            entry_price = zone_low + (zone_range * 0.05)  # 5% front-run
+        # CORRECTED: Entry and stop logic - Front-run BEYOND zone boundaries
+        if zone['type'] in ['R-B-R', 'D-B-R']:  # Demand zones (buy) - front-run ABOVE zone
+            entry_price = zone_high + (zone_range * 0.05)  # 5% ABOVE zone (front-run)
             direction = 'BUY'
-            initial_stop = zone_low - (zone_range * 0.33)  # 33% buffer
-        elif zone['type'] in ['D-B-D', 'R-B-D']:  # Supply zones (sell)
-            entry_price = zone_high - (zone_range * 0.05)  # 5% front-run
+            initial_stop = zone_low - (zone_range * 0.33)  # 33% buffer below zone
+        elif zone['type'] in ['D-B-D', 'R-B-D']:  # Supply zones (sell) - front-run BELOW zone
+            entry_price = zone_low - (zone_range * 0.05)  # 5% BELOW zone (front-run)
             direction = 'SELL'
-            initial_stop = zone_high + (zone_range * 0.33)  # 33% buffer
+            initial_stop = zone_high + (zone_range * 0.33)  # 33% buffer above zone
         else:
             return None
         
-        # Check if current price can trigger entry
+        # CORRECTED: Check if price can trigger entry from proper direction
         current_candle = data.iloc[current_idx]
         
         can_enter = False
-        if direction == 'BUY' and current_candle['low'] <= entry_price:
-            can_enter = True
-        elif direction == 'SELL' and current_candle['high'] >= entry_price:
-            can_enter = True
-        
-        if not can_enter:
-            return None
+        if direction == 'BUY':
+            # For demand zones: price must reach the front-run level above zone
+            if current_candle['high'] >= entry_price:
+                can_enter = True
+        elif direction == 'SELL':
+            # For supply zones: price must reach the front-run level below zone
+            if current_candle['low'] <= entry_price:
+                can_enter = True
         
         # Calculate position size using UPDATED risk config
         risk_amount = 10000 * (RISK_CONFIG['risk_limits']['max_risk_per_trade'] / 100)  # 5% from settings
