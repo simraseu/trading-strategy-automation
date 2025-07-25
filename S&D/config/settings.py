@@ -12,14 +12,6 @@ CANDLE_THRESHOLDS = {
     'explosive_min_ratio': 0.80   # Explosive: ratio > 80%
 }
 
-# ZONE DETECTION PARAMETERS
-ZONE_PARAMETERS = {
-    'max_base_candles': 6,        # Maximum base candles (1-6 range)
-    'ideal_base_candles': 3,      # Sweet spot (1-3 highest probability)
-    'min_leg_out_ratio': 2.5,     # Leg-out must be 2x base size
-    'min_leg_strength': 1         # Minimum decisive/explosive candles in leg
-}
-
 # DATA SETTINGS - ADAPTED FOR YOUR FILE STRUCTURE
 DATA_SETTINGS = {
     'primary_pairs': ['EURUSD', 'GBPUSD', 'USDJPY', 'CADJPY'],
@@ -29,8 +21,11 @@ DATA_SETTINGS = {
     'data_source': 'MetaTrader'   # Your data source format
 }
 
-# FILE PATHS - ADAPTED FOR YOUR STRUCTURE
-BASE_DIR = r'C:\Users\sim\Desktop\Quant\OTC\trading-strategy-automation\S&D'
+# FILE PATHS - CROSS-PLATFORM COMPATIBLE
+# Auto-detect project root directory
+PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+BASE_DIR = os.path.join(PROJECT_ROOT, 'S&D')
+
 PATHS = {
     'raw_data': os.path.join(BASE_DIR, 'Data', 'raw'),
     'processed_data': os.path.join(BASE_DIR, 'Data', 'processed'),
@@ -58,40 +53,35 @@ COLUMN_MAPPING = {
     'volume': '<TICKVOL>'
 }
 
-# VALIDATION SETTINGS
+# DATA VALIDATION SETTINGS
 VALIDATION = {
     'min_candles_for_test': 100,
     'accuracy_threshold': 0.95,
-    'sample_size_for_manual_check': 50
+    'sample_size_for_manual_check': 50,
+    'max_price_deviation_pct': 1.0,    # Allow 1% price deviation for real-world data
+    'min_data_completeness': 0.95      # Require 95% complete data
 }
 
-# ZONE DETECTION PARAMETERS - FIXED
-ZONE_PARAMETERS = {
-    'max_base_candles': 6,        # Maximum base candles (1-6 range)
-    'ideal_base_candles': 3,      # Sweet spot (1-3 highest probability)
-    'min_leg_out_ratio': 2.5,     # Leg-out must be 2.0x base size 
-    'min_leg_strength': 1         # Minimum decisive/explosive candles in leg
-}
-
-# ZONE DETECTION SETTINGS - FIXED
+# ZONE DETECTION CONFIGURATION - UNIFIED
 ZONE_CONFIG = {
     'min_base_candles': 1,
     'max_base_candles': 6,
     'optimal_base_candles': 3,
-    'min_legout_ratio': 2.5,      # 2.0x minimum ratio requirement
+    'min_legout_ratio': 2.5,      # 2.5x minimum ratio requirement
     'min_leg_strength': 1,
     'max_base_retracement': 0.3,
     'min_pattern_pips': 10,
     'pip_value': 0.0001,
     'momentum_patterns': ['D-B-D', 'R-B-R'],
-    'focus_patterns': ['D-B-D', 'R-B-R']
+    'focus_patterns': ['D-B-D', 'R-B-R'],
+    'reversal_patterns': ['D-B-R', 'R-B-D']
 }
 
 # TREND CLASSIFICATION SETTINGS - SIMPLIFIED
 TREND_CONFIG = {
-    'ema_fast': 50,               # Only EMA50
-    'ema_slow': 200,              # Only EMA200
-    # REMOVED: ema_medium (100), min_separation, ranging filters
+    'fast_ema': 50,               # EMA50 for trend detection
+    'slow_ema': 200,              # EMA200 for trend detection
+    'method': 'dual_ema',         # Dual EMA crossover method
     'trend_classifications': [
         'bullish',                # EMA50 > EMA200
         'bearish'                 # EMA50 < EMA200
@@ -101,16 +91,13 @@ TREND_CONFIG = {
 # RISK MANAGEMENT CONFIGURATION - MODULE 4
 RISK_CONFIG = {
     'account_settings': {
-        'starting_balance': 10000,      # $100,000 account
+        'starting_balance': 10000,      # $10,000 account
         'currency': 'USD',
         'broker_leverage': 30,          # EU regulation limit
-      # 'min_free_margin': 10000        # Keep $10,000 minimum margin
+        'decimal_precision': 5          # Precision for forex pairs
     },
     'risk_limits': {
-        'max_risk_per_trade': 5.0,     # 5% max per trade
-        #'max_daily_risk': 6.0,         # 6% max daily exposure  
-        #'max_portfolio_risk': 20.0,    # 20% total exposure limit
-        #'max_correlated_risk': 4.0     # 4% max on correlated pairs
+        'max_risk_per_trade': 5.0     # 5% max per trade
     },
     'position_sizing': {
         'method': 'fixed_risk_percent', # Fixed 5% risk per trade
@@ -120,10 +107,8 @@ RISK_CONFIG = {
     },
     'stop_loss_rules': {
         'method': 'zone_boundary_plus_buffer',
-        'buffer_pips': 5,              # 5 pip buffer beyond zone
-        #'max_stop_distance': 80,       # Max 80 pip stop loss
-        #'min_stop_distance': 15,       # Min 15 pip stop loss
-        'round_to_level': False         # Round to psychological levels
+        'buffer_percent': 0.33,        # 33% buffer beyond zone boundary
+        'round_to_level': False        # Round to psychological levels
     },
     'take_profit_rules': {
         'risk_reward_ratio': 2.0,      # Minimum 1:2 RR
@@ -145,7 +130,6 @@ SIGNAL_CONFIG = {
         'trend_alignment': True    # Must align with trend
     },
     'risk_management': {
-        #'max_signals_per_day': 3,
         'position_sizing': 'fixed_risk',
         'stop_loss_method': 'zone_boundary'
     },
@@ -156,10 +140,15 @@ SIGNAL_CONFIG = {
     }
 }
 
-print("✅ Signal Generation configuration added!")
-print("✅ Risk Management configuration added!")
-print("✅ Triple EMA Trend Classification configured!")
-print("✅ Zone Detection configuration added!")
+# Validate configuration on load
+def validate_paths():
+    """Ensure all required directories exist"""
+    for path_name, path_value in PATHS.items():
+        os.makedirs(path_value, exist_ok=True)
+
+# Auto-create directories on import
+validate_paths()
+
 print("✅ Configuration loaded successfully!")
-print("✅ Trend Classification configuration added!")
 print(f"📁 Data path: {PATHS['raw_data']}")
+print(f"💾 Results path: {PATHS['results']}")
