@@ -21,7 +21,7 @@ class DataLoader:
         """
         print(f"📊 Loading {pair} {timeframe} data...")
         
-        # First try direct OANDA format matching
+# First try direct OANDA format matching
         files = self.list_available_files()
         target_file = None
         
@@ -45,6 +45,9 @@ class DataLoader:
                 '4daily': ['4Daily', '4D'],
                 '5daily': ['5Daily', '5D'],
                 'weekly': ['Weekly', '1W'],
+                '2weekly': ['2Weekly', '2W'],
+                '3weekly': ['3Weekly', '3W'], 
+                'monthly': ['Monthly', '1M'],
                 'h12': ['H12', '12H'],
                 'h4': ['H4', '4H']
             }

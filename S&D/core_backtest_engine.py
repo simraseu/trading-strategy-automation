@@ -496,9 +496,26 @@ class CoreBacktestEngine:
         return None
     
     def calculate_performance_metrics(self, trades: List[Dict], pair: str, timeframe: str) -> Dict:
-        """Calculate comprehensive performance metrics"""
+        """Calculate comprehensive performance metrics with CORRECTED duration conversion"""
         if not trades:
             return self.create_empty_result(pair, timeframe, "No trades executed")
+        
+        # Duration conversion factors (candles to actual days)
+        timeframe_to_days = {
+            '1D': 1,
+            '2D': 2, 
+            '3D': 3,
+            '4D': 4,
+            '5D': 5,
+            '1W': 7,
+            '2W': 14,
+            '3W': 21,
+            '1M': 30,
+            'H12': 0.5,
+            'H8': 0.33,
+            'H4': 0.17,
+            'H1': 0.04
+        }
         
         # Basic metrics
         total_trades = len(trades)
@@ -515,6 +532,11 @@ class CoreBacktestEngine:
         # Return calculation
         total_return = (total_pnl / 10000) * 100  # % return on $10,000
         
+        # CORRECTED: Duration conversion from candles to actual days
+        avg_duration_candles = np.mean([t.get('duration_days', 0) for t in trades])
+        multiplier = timeframe_to_days.get(timeframe, 1)
+        avg_duration_actual_days = avg_duration_candles * multiplier
+        
         return {
             'pair': pair,
             'timeframe': timeframe,
@@ -527,7 +549,8 @@ class CoreBacktestEngine:
             'gross_profit': round(gross_profit, 2),
             'gross_loss': round(gross_loss, 2),
             'total_return': round(total_return, 2),
-            'avg_trade_duration': round(np.mean([t.get('duration_days', 0) for t in trades]), 1),
+            'avg_trade_duration': round(avg_duration_actual_days, 1),  # CORRECTED: Now in actual days
+            'avg_trade_duration_candles': round(avg_duration_candles, 1),  # Optional: keep original for debugging
             'validation_method': 'walk_forward_realistic',
             'leg_out_threshold': 2.5,  # Add missing key
             'trades': trades
@@ -548,7 +571,6 @@ class CoreBacktestEngine:
             'gross_loss': 0.0,
             'total_return': 0.0,
             'avg_trade_duration': 0.0,
-            'leg_out_threshold': ZONE_CONFIG['min_legout_ratio'],
             'description': reason,
             'trades': []
         }

@@ -15,7 +15,7 @@ CANDLE_THRESHOLDS = {
 # DATA SETTINGS - ADAPTED FOR YOUR FILE STRUCTURE
 DATA_SETTINGS = {
     'primary_pairs': ['EURUSD', 'GBPUSD', 'USDJPY', 'CADJPY'],
-    'timeframes': ['Daily', 'Weekly', 'H12', 'H4'],
+    'timeframes': ['Daily', 'Weekly', '2W', '3W', '1M', 'H12', 'H4'],
     'required_history': 500,      # Minimum candles needed
     'validation_threshold': 0.95, # 95% accuracy requirement
     'data_source': 'MetaTrader'   # Your data source format
@@ -34,10 +34,12 @@ PATHS = {
     'validation': os.path.join(BASE_DIR, 'tests', 'manual_validation')
 }
 
-# DATA FILE PATTERNS - FOR YOUR METATRADER FORMAT
 FILE_PATTERNS = {
     'daily': '{pair}.raw_Daily_*.csv',
     'weekly': '{pair}.raw_Weekly_*.csv',
+    '2w': '{pair}.raw_2W_*.csv',
+    '3w': '{pair}.raw_3W_*.csv',
+    '1m': '{pair}.raw_1M_*.csv',
     'h12': '{pair}.raw_H12_*.csv',
     'h8': '{pair}.raw_H8_*.csv',
     'h4': '{pair}.raw_H4_*.csv'
