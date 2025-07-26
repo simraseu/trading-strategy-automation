@@ -30,7 +30,6 @@ class RiskManager:
         
         # Risk tracking
         self.current_exposure = 0.0
-        self.daily_risk_used = 0.0
         self.open_positions = []
         
         # Performance tracking
@@ -43,12 +42,7 @@ class RiskManager:
         print(f"🛡️  Risk Manager initialized:")
         print(f"   Account Balance: ${self.account_balance:,.2f}")
         print(f"   Max Risk Per Trade: {self.config['risk_limits']['max_risk_per_trade']}%")
-        
-        # Only print daily risk if it exists in config
-        if 'max_daily_risk' in self.config['risk_limits']:
-            print(f"   Max Daily Risk: {self.config['risk_limits']['max_daily_risk']}%")
-        else:
-            print(f"   Daily Risk: No limit (single trade focus)")
+        print(f"   Daily Risk: No limit (single trade focus)")
     
     def check_zone_testing(self, zone: Dict, data: pd.DataFrame) -> Tuple[bool, str]:
         """
@@ -121,13 +115,6 @@ class RiskManager:
             
             # Calculate risk amount
             risk_amount = self.calculate_risk_amount(stop_distance_pips, position_size, pair)
-            
-            # Check risk budget (if configured)
-            if not self.check_risk_budget(risk_amount):
-                return {
-                    'is_tradeable': False,
-                    'reason': "Risk budget exceeded"
-                }
             
             # Return complete trading parameters using YOUR strategy
             return {
@@ -244,23 +231,6 @@ class RiskManager:
         
         return position_size
     
-    def check_risk_budget(self, risk_amount: float) -> bool:
-        """
-        Check if trade fits within daily risk budget (if configured)
-        
-        Args:
-            risk_amount: Risk amount for the trade
-            
-        Returns:
-            Boolean indicating if trade fits budget
-        """
-        # If no daily risk limit configured, always return True
-        if 'max_daily_risk' not in self.config['risk_limits']:
-            return True
-        
-        max_daily_risk = self.account_balance * (self.config['risk_limits']['max_daily_risk'] / 100)
-        
-        return (self.daily_risk_used + risk_amount) <= max_daily_risk
     
     def get_pip_value(self, pair: str = 'EURUSD') -> float:
         """
@@ -354,8 +324,7 @@ class RiskManager:
             'total_trades': self.total_trades,
             'winning_trades': self.winning_trades,
             'win_rate': (self.winning_trades / self.total_trades * 100) if self.total_trades > 0 else 0,
-            'daily_risk_used': self.daily_risk_used,
             'current_exposure': self.current_exposure,
             'risk_per_trade_percent': self.config['risk_limits']['max_risk_per_trade'],
-            'max_daily_risk_percent': self.config['risk_limits']['max_daily_risk']
+            'max_daily_risk_percent': None
         }

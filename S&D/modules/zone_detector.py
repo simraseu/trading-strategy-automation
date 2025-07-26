@@ -585,7 +585,7 @@ class ZoneDetector:
     
     
     def check_zone_testing(self, zone: Dict, data: pd.DataFrame, 
-                          evaluation_date: Optional[pd.Timestamp] = None) -> Tuple[bool, str]:
+                      evaluation_date: Optional[int] = None) -> Tuple[bool, str]:
         """
         Check if zone was valid at specific point in time with CORRECT approach direction logic
         
@@ -617,13 +617,13 @@ class ZoneDetector:
             # Determine evaluation cutoff point
             if evaluation_date is None:
                 end_check_idx = len(data) - 1
-                cutoff_date = data.index[-1]
+                cutoff_idx = data.index[-1]
             else:
-                try:
+                if evaluation_date in data.index:
                     end_check_idx = data.index.get_loc(evaluation_date)
-                    cutoff_date = evaluation_date
-                except KeyError:
-                    return False, f"Evaluation date {evaluation_date} not found in data"
+                    cutoff_idx = evaluation_date
+                else:
+                    return False, f"Evaluation index {evaluation_date} not found in data"
             
             # Edge case: No data after zone formation to check
             if zone_end_idx >= end_check_idx:
@@ -632,12 +632,13 @@ class ZoneDetector:
             # Check candles from zone end to evaluation cutoff
             start_check_idx = zone_end_idx + 1
             candles_to_check = data.iloc[start_check_idx:end_check_idx + 1]
-            
+
             if len(candles_to_check) == 0:
                 return True, "Zone untested - no candles in evaluation window"
-            
+
             # CORRECTED LOGIC: Check approach direction before applying penetration rules
-            for i, (date_idx, candle) in enumerate(candles_to_check.iterrows()):
+            for i, candle in candles_to_check.iterrows():
+                candle_idx = i  # Integer index
                 
                 if zone_type in ['R-B-R', 'D-B-R']:  # Demand zones (bullish leg-out)
                     
@@ -655,7 +656,7 @@ class ZoneDetector:
                         # Single Rule: 33% wick penetration through BOTTOM of zone
                         wick_test_level = zone_low + (zone_size * 0.33)
                         if candle['low'] < wick_test_level:
-                            return False, f"Demand zone tested on {date_idx.strftime('%Y-%m-%d')} - wick penetrated 33% level at {wick_test_level:.5f} (low: {candle['low']:.5f})"
+                            return False, f"Demand zone tested at index {candle_idx} - wick penetrated 33% level at {wick_test_level:.5f} (low: {candle['low']:.5f})"
                     
                     # If price is completely above zone, ignore (not yet approaching)
                         
@@ -675,7 +676,7 @@ class ZoneDetector:
                         # Single Rule: 33% wick penetration through TOP of zone
                         wick_test_level = zone_high - (zone_size * 0.33)
                         if candle['high'] > wick_test_level:
-                            return False, f"Supply zone tested on {date_idx.strftime('%Y-%m-%d')} - wick penetrated 33% level at {wick_test_level:.5f} (high: {candle['high']:.5f})"
+                            return False, f"Supply zone tested at index {candle_idx} - wick penetrated 33% level at {wick_test_level:.5f} (high: {candle['high']:.5f})"
                     
                     # If price is completely below zone, ignore (not yet approaching)
                 
@@ -683,7 +684,7 @@ class ZoneDetector:
                     return False, f"Unknown zone type: {zone_type}"
             
             # Zone was valid throughout the evaluation period
-            return True, f"Zone untested from formation to {cutoff_date.strftime('%Y-%m-%d')} ({len(candles_to_check)} candles checked)"
+            return True, f"Zone untested from formation to index {cutoff_idx} ({len(candles_to_check)} candles checked)"
             
         except KeyError as e:
             return False, f"Missing zone data: {str(e)}"

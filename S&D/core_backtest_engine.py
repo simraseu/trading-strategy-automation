@@ -190,6 +190,13 @@ class CoreBacktestEngine:
             data = self.load_data_with_validation(pair, timeframe, days_back)
             if data is None:
                 return self.create_empty_result(pair, timeframe, "Insufficient data")
+            # Add this right after: data = self.load_data_with_validation(pair, timeframe, days_back)
+            print(f"\n🔍 DATA STRUCTURE DEBUG:")
+            print(f"   Data shape: {data.shape}")
+            print(f"   Data index type: {type(data.index[0])}")
+            print(f"   First 3 dates: {data.index[:3].tolist()}")
+            print(f"   Last 3 dates: {data.index[-3:].tolist()}")
+            print(f"   Date range: {data.index[0]} to {data.index[-1]}")
             
             # Initialize components using YOUR UPDATED MODULES
             candle_classifier = CandleClassifier(data)
@@ -225,21 +232,21 @@ class CoreBacktestEngine:
         
         print(f"   📊 Found {len(all_patterns)} total patterns")
         
-        # Apply 2.5x VALIDATION filter (zones that actually hit 2.5x targets)
-        validated_patterns = [
+        # CRITICAL FIX: Use ALL formed patterns - NO future data filtering
+        valid_patterns = [
             pattern for pattern in all_patterns
-            if pattern.get('target_2_5x_hit', False) == True  # Only zones that hit 2.5x target
+            if pattern.get('end_idx') is not None  # Only need basic formation
         ]
+
+        print(f"   🎯 Using {len(valid_patterns)} patterns WITHOUT future data filtering")
         
-        if not validated_patterns:
+        if not valid_patterns:
             total_zones = len(all_patterns)
-            validated_count = len(validated_patterns)
-            return self.create_empty_result(pair, timeframe, f"No validated zones: {validated_count}/{total_zones} hit 2.5x target")
+            valid_count = len(valid_patterns)
+            return self.create_empty_result(pair, timeframe, f"No valid zones: {valid_count}/{total_zones} formed properly")
+
+        print(f"   🎯 {len(valid_patterns)} zones available for trading from {len(all_patterns)} total")
         
-        print(f"   🎯 {len(validated_patterns)} zones validated (hit 2.5x target) from {len(all_patterns)} total")
-        
-        # Use validated patterns instead of leg-out filtered patterns
-        valid_patterns = validated_patterns
         
         # Execute trades with REALISTIC LOGIC
         trades = self.execute_realistic_trades(valid_patterns, data, trend_data, timeframe)
@@ -529,7 +536,9 @@ class CoreBacktestEngine:
             'gross_loss': round(gross_loss, 2),
             'total_return': round(total_return, 2),
             'avg_trade_duration': round(np.mean([t.get('duration_days', 0) for t in trades]), 1),
-            'validation_method': '2.5x_target_validation',  # Record validation method used            'trades': trades
+            'validation_method': 'walk_forward_realistic',
+            'leg_out_threshold': 2.5,  # Add missing key
+            'trades': trades
         }
     
     def create_empty_result(self, pair: str, timeframe: str, reason: str) -> Dict:
