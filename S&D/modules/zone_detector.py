@@ -66,9 +66,6 @@ class ZoneDetector:
             
             total_patterns = len(dbd_patterns) + len(rbr_patterns) + len(dbr_patterns) + len(rbd_patterns)
             
-            # CRITICAL FIX: Validation reporting
-            validation_report = self.validate_zone_uniqueness()
-            
             print(f"✅ Zone detection complete:")
             print(f"   D-B-D: {len(dbd_patterns)}, R-B-R: {len(rbr_patterns)}, D-B-R: {len(dbr_patterns)}, R-B-D: {len(rbd_patterns)}")
             
@@ -77,8 +74,7 @@ class ZoneDetector:
                 'rbr_patterns': rbr_patterns,
                 'dbr_patterns': dbr_patterns,
                 'rbd_patterns': rbd_patterns,
-                'total_patterns': total_patterns,
-                'validation_report': validation_report
+                'total_patterns': total_patterns
             }
             
         except Exception as e:
@@ -124,7 +120,8 @@ class ZoneDetector:
                     pattern_type='D-B-D',
                     leg_in=leg_in,
                     base_sequence=base_sequence,
-                    leg_out=leg_out
+                    leg_out=leg_out,
+                    data=data
                 )
                 pattern['category'] = 'momentum'
                 
@@ -176,7 +173,8 @@ class ZoneDetector:
                     pattern_type='R-B-R',
                     leg_in=leg_in,
                     base_sequence=base_sequence,
-                    leg_out=leg_out
+                    leg_out=leg_out,
+                    data=data
                 )
                 pattern['category'] = 'momentum'
                 
@@ -226,7 +224,8 @@ class ZoneDetector:
                     pattern_type='D-B-R',
                     leg_in=leg_in,
                     base_sequence=base_sequence,
-                    leg_out=leg_out
+                    leg_out=leg_out,
+                    data=data
                 )
                 pattern['category'] = 'reversal'
                 
@@ -276,7 +275,8 @@ class ZoneDetector:
                     pattern_type='R-B-D',
                     leg_in=leg_in,
                     base_sequence=base_sequence,
-                    leg_out=leg_out
+                    leg_out=leg_out,
+                    data=data
                 )
                 pattern['category'] = 'reversal'
                 
@@ -291,34 +291,49 @@ class ZoneDetector:
         return patterns
     
     def identify_leg_in(self, data: pd.DataFrame, start_idx: int, direction: str) -> Optional[Dict]:
-        """Identify leg-in movement"""
+        """Identify leg-in movement with STRICT single-candle validation"""
         if start_idx >= len(data) - 2:
             return None
         
-        for leg_length in range(1, 4):  # Try 1, 2, or 3 candles
-            end_idx = start_idx + leg_length - 1
-            
-            if end_idx >= len(data):
-                break
-            
-            leg_data = data.iloc[start_idx:end_idx + 1]
-            
-            if self.is_valid_leg(leg_data, direction):
-                leg_range = leg_data['high'].max() - leg_data['low'].min()
-                
-                return {
-                'start_idx': start_idx,
-                'end_idx': end_idx,
-                'direction': direction,
-                'range': leg_range,
-                'candle_count': leg_length
-                }
+        # CORRECTED: Only check single candle for leg-in (most common pattern)
+        # Multi-candle leg-ins are rare and often misclassified
         
-        return None
+        first_candle = data.iloc[start_idx]
+        body_size = abs(first_candle['close'] - first_candle['open'])
+        total_range = first_candle['high'] - first_candle['low']
+        
+        if total_range == 0:
+            body_ratio = 0
+        else:
+            body_ratio = body_size / total_range
+        
+        # MANDATORY: Leg-in candle must be decisive or explosive (>50% body ratio)
+        if body_ratio <= 0.50:
+            return None  # Not a valid leg-in
+        
+        # Check directional validity
+        is_bullish = first_candle['close'] > first_candle['open']
+        is_bearish = first_candle['close'] < first_candle['open']
+        
+        if direction == 'bullish' and not is_bullish:
+            return None
+        elif direction == 'bearish' and not is_bearish:
+            return None
+        
+        leg_range = first_candle['high'] - first_candle['low']
+        
+        return {
+            'start_idx': start_idx,
+            'end_idx': start_idx,  # Single candle
+            'direction': direction,
+            'range': leg_range,
+            'candle_count': 1,  # Always 1 for corrected logic
+            'first_candle_body_ratio': body_ratio
+        }
     
     def find_all_consecutive_base_candles(self, data: pd.DataFrame, start_idx: int) -> Optional[Dict]:
         """
-        FIXED: Find ALL consecutive base candles - ALWAYS use complete sequence
+        FIXED: Find ALL consecutive base candles with STRICT validation
         CRITICAL FIX: Prevents multiple zones from same base sequence
         """
         if start_idx >= len(data):
@@ -330,12 +345,18 @@ class ZoneDetector:
         for i in range(start_idx, min(start_idx + self.config['max_base_candles'], len(data))):
             candle = data.iloc[i]
             
-            # Check if candle is base (≤50% body ratio)
-            classification = self.candle_classifier.classify_single_candle(
-                candle['open'], candle['high'], candle['low'], candle['close']
-            )
+            # STRICT base candle validation - must be ≤50% body ratio
+            body_size = abs(candle['close'] - candle['open'])
+            total_range = candle['high'] - candle['low']
             
-            if classification == 'base':
+            # Handle zero range edge case
+            if total_range == 0:
+                body_ratio = 0
+            else:
+                body_ratio = body_size / total_range
+            
+            # CRITICAL FIX: Strict 50% threshold enforcement
+            if body_ratio <= 0.50:  # Base candle confirmed
                 consecutive_base_indices.append(i)
             else:
                 # First non-base candle breaks the sequence
@@ -369,8 +390,8 @@ class ZoneDetector:
     def identify_leg_out(self, data: pd.DataFrame, start_idx: int, 
                     base_sequence: Dict, direction: str) -> Optional[Dict]:
         """
-        FIXED: Identify leg-out with STRICT first candle validation
-        CRITICAL FIX: First leg-out candle MUST be decisive/explosive (never base)
+        FIXED: Identify leg-out with STRICT validation AND pattern invalidation check
+        CRITICAL FIX: Detect invalidating candles that break pattern integrity
         """
         if start_idx >= len(data):
             return None
@@ -378,60 +399,132 @@ class ZoneDetector:
         base_high = base_sequence['high']
         base_low = base_sequence['low']
         base_range = base_sequence['range']
+        base_end_idx = base_sequence['end_idx']
         
-        for leg_length in range(1, 4):  # Try 1, 2, or 3 candles
-            end_idx = start_idx + leg_length - 1
+        # CRITICAL FIX: Check for pattern invalidation BEFORE leg-out detection
+        # Scan candles between base end and potential leg-out start
+        # CRITICAL FIX: Check for pattern invalidation IMMEDIATELY after base sequence
+        # ANY decisive/explosive candle after base sequence invalidates the pattern
+        invalidation_check_idx = base_end_idx + 1
+        
+        # Check the FIRST candle after base sequence for invalidation
+        if invalidation_check_idx < len(data):
+            invalidation_candle = data.iloc[invalidation_check_idx]
             
-            if end_idx >= len(data):
-                break
+            # Calculate body ratio for invalidation candle
+            body_size = abs(invalidation_candle['close'] - invalidation_candle['open'])
+            total_range = invalidation_candle['high'] - invalidation_candle['low']
             
-            leg_data = data.iloc[start_idx:end_idx + 1]
+            if total_range == 0:
+                body_ratio = 0
+            else:
+                body_ratio = body_size / total_range
             
-            # CRITICAL FIX: STRICT first candle validation
-            first_candle = data.iloc[start_idx]
-            first_candle_classification = self.candle_classifier.classify_single_candle(
-                first_candle['open'], first_candle['high'], first_candle['low'], first_candle['close']
-            )
-            
-            # MANDATORY: First leg-out candle MUST be decisive or explosive (never base)
-            if first_candle_classification == 'base':
-                continue  # Skip - invalid leg-out starting with base candle
-            
-            # Check if leg is valid and breaks out of base
-            if self.is_valid_leg(leg_data, direction):
-                leg_range = leg_data['high'].max() - leg_data['low'].min()
+            # If candle is decisive/explosive (>50% body ratio), check for invalidation
+            if body_ratio > 0.50:
+                # Check if this candle moves opposite to expected leg-out direction
+                is_bullish_candle = invalidation_candle['close'] > invalidation_candle['open']
+                is_bearish_candle = invalidation_candle['close'] < invalidation_candle['open']
                 
-                # Check breakout from base
-                if direction == 'bullish':
-                    leg_high = leg_data['high'].max()
-                    if leg_high <= base_high:
-                        continue  # Didn't break out
-                else:  # bearish
-                    leg_low = leg_data['low'].min()
-                    if leg_low >= base_low:
-                        continue  # Didn't break out
-                
-                # Calculate ratio to base range
-                ratio_to_base = leg_range / base_range if base_range > 0 else 0
-                
-                return {
-                    'start_idx': start_idx,
-                    'end_idx': end_idx,
-                    'direction': direction,
-                    'range': leg_range,
-                    'ratio_to_base': ratio_to_base,
-                    'candle_count': leg_length,
-                    'first_candle_type': first_candle_classification  # Track for validation
-                }
+                # INVALIDATION RULES:
+                if direction == 'bullish' and is_bearish_candle:
+                    return None  # Bearish decisive candle invalidates bullish leg-out expectation
+                elif direction == 'bearish' and is_bullish_candle:
+                    return None  # Bullish decisive candle invalidates bearish leg-out expectation
+        
+        # If we reach here, no invalidation detected - proceed with leg-out detection
+        # But ONLY accept leg-out if it starts immediately after base (no gaps allowed)
+        if start_idx != base_end_idx + 1:
+            return None  # Gap between base and leg-out not allowed
+        
+        # CORRECTED: Only check single candle for leg-out (most reliable pattern)
+        if start_idx >= len(data):
+            return None
+            
+        leg_data = data.iloc[start_idx:start_idx + 1]  # Single candle only
+        end_idx = start_idx
+        
+        # CRITICAL FIX: STRICT first candle validation
+        first_candle = data.iloc[start_idx]
+        
+        # Use direct body ratio calculation for consistency
+        body_size = abs(first_candle['close'] - first_candle['open'])
+        total_range = first_candle['high'] - first_candle['low']
+        
+        if total_range == 0:
+            body_ratio = 0
+        else:
+            body_ratio = body_size / total_range
+        
+        # MANDATORY: First leg-out candle MUST NOT be base (>50% body ratio)
+        if body_ratio <= 0.50:
+            return None  # Invalid leg-out starting with base candle
+        
+        # Check if leg is valid and breaks out of base
+        if self.is_valid_leg(leg_data, direction):
+            leg_range = leg_data['high'].max() - leg_data['low'].min()
+            
+            # Check breakout from base
+            if direction == 'bullish':
+                leg_high = leg_data['high'].max()
+                if leg_high <= base_high:
+                    return None  # Didn't break out
+            else:  # bearish
+                leg_low = leg_data['low'].min()
+                if leg_low >= base_low:
+                    return None  # Didn't break out
+            
+            # Calculate ratio to base range
+            ratio_to_base = leg_range / base_range if base_range > 0 else 0
+            
+            # Determine first candle classification for tracking
+            if body_ratio <= 0.50:
+                first_candle_type = 'base'
+            elif body_ratio > 0.80:
+                first_candle_type = 'explosive'
+            else:
+                first_candle_type = 'decisive'
+            
+            return {
+                'start_idx': start_idx,
+                'end_idx': end_idx,
+                'direction': direction,
+                'range': leg_range,
+                'ratio_to_base': ratio_to_base,
+                'candle_count': 1,  # Always 1 for single candle
+                'first_candle_type': first_candle_type
+            }
         
         return None
     
     def create_pattern(self, pattern_type: str, leg_in: Dict, 
-                  base_sequence: Dict, leg_out: Dict) -> Dict:
-        """Create complete pattern with zone boundaries"""
-        # Zone boundaries = base candle boundaries
+                  base_sequence: Dict, leg_out: Dict, data: pd.DataFrame) -> Dict:
+        """Create complete pattern with CORRECT zone boundaries + leg-out wick extensions"""
+        
+        # Start with base candle boundaries
         zone_high = base_sequence['high']
         zone_low = base_sequence['low']
+        
+        # Get leg-out data for potential zone extension
+        leg_out_data = data.iloc[leg_out['start_idx']:leg_out['end_idx'] + 1]
+        leg_out_high = leg_out_data['high'].max()
+        leg_out_low = leg_out_data['low'].min()
+        
+        # CORRECTED LOGIC: Only extend the "approach side" of zones
+        if pattern_type in ['D-B-D', 'R-B-D']:  # Supply zones (price approaches from ABOVE)
+            # Supply zones: ONLY extend zone_high if leg-out wick goes higher
+            # Do NOT extend zone_low - keep base_low as zone_low
+            if leg_out_high > zone_high:
+                zone_high = leg_out_high
+            # zone_low stays as base_low (no extension downward for supply zones)
+                
+        elif pattern_type in ['R-B-R', 'D-B-R']:  # Demand zones (price approaches from BELOW)
+            # Demand zones: ONLY extend zone_low if leg-out wick goes lower
+            # Do NOT extend zone_high - keep base_high as zone_high  
+            if leg_out_low < zone_low:
+                zone_low = leg_out_low
+            # zone_high stays as base_high (no extension upward for demand zones)
+        
         zone_range = zone_high - zone_low
         
         return {
@@ -441,9 +534,14 @@ class ZoneDetector:
             'leg_in': leg_in,
             'base': base_sequence,
             'leg_out': leg_out,
-            'zone_high': zone_high,
-            'zone_low': zone_low,
+            'zone_high': zone_high,  # Extended if leg-out exceeds base
+            'zone_low': zone_low,    # Extended if leg-out exceeds base
             'zone_range': zone_range,
+            'leg_out_high': leg_out_high,  # Track for analysis
+            'leg_out_low': leg_out_low,    # Track for analysis
+            'base_high': base_sequence['high'],  # Track original base boundaries
+            'base_low': base_sequence['low'],    # Track original base boundaries
+            'extended': leg_out_high > base_sequence['high'] or leg_out_low < base_sequence['low'],
             'formation_date': None  # Will be set by caller if needed
         }
     
@@ -579,60 +677,6 @@ class ZoneDetector:
         
         if len(data) < 5:
             raise ValueError("Insufficient data for pattern detection")
-
-    def validate_zone_uniqueness(self) -> Dict:
-        """
-        VALIDATION: Check that fixes worked correctly
-        Returns validation report
-        """
-        validation_report = {
-            'total_zones': len(self.created_zones),
-            'unique_base_sequences': len(self.used_base_sequences),
-            'overlapping_zones_detected': 0,
-            'leg_out_violations': 0,
-            'same_base_sequence_violations': 0,
-            'validation_passed': False
-        }
-        
-        # IMPROVED: Check for zones using the same base sequence (the real problem)
-        base_sequence_usage = {}
-        for zone in self.created_zones:
-            if 'base' in zone and 'base_sequence_id' in zone['base']:
-                base_seq_id = zone['base']['base_sequence_id']
-                if base_seq_id in base_sequence_usage:
-                    validation_report['same_base_sequence_violations'] += 1
-                    print(f"      ⚠️  Multiple zones using base sequence {base_seq_id}")
-                else:
-                    base_sequence_usage[base_seq_id] = zone
-        
-        # Check for truly overlapping zones (same time period AND same price levels)
-        zone_signatures = []
-        for zone in self.created_zones:
-            # Create signature: time_period + price_levels
-            time_signature = f"{zone['start_idx']}_{zone['end_idx']}"
-            price_signature = f"{zone['zone_low']:.5f}_{zone['zone_high']:.5f}"
-            full_signature = f"{time_signature}_{price_signature}"
-            
-            if full_signature in zone_signatures:
-                validation_report['overlapping_zones_detected'] += 1
-                print(f"      ⚠️  Duplicate zone signature: {full_signature}")
-            else:
-                zone_signatures.append(full_signature)
-        
-        # Check leg-out first candle validation
-        for zone in self.created_zones:
-            if 'leg_out' in zone and 'first_candle_type' in zone['leg_out']:
-                if zone['leg_out']['first_candle_type'] == 'base':
-                    validation_report['leg_out_violations'] += 1
-        
-        # CORRECTED: Main validation focuses on base sequence uniqueness
-        validation_report['validation_passed'] = (
-            validation_report['same_base_sequence_violations'] == 0 and
-            validation_report['leg_out_violations'] == 0 and
-            validation_report['total_zones'] == validation_report['unique_base_sequences']
-        )
-        
-        return validation_report
 
     def reset_zone_tracking(self):
         """Reset tracking for new dataset"""
