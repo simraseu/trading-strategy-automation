@@ -339,17 +339,21 @@ class CoreBacktestEngine:
         else:
             return None
         
-        # CORRECTED: Check if price can trigger entry from proper direction
+        # CORRECTED: Check if price can trigger entry from proper approach direction
         current_candle = data.iloc[current_idx]
         
         can_enter = False
         if direction == 'BUY':
-            # For demand zones: price must reach the front-run level above zone
-            if current_candle['high'] >= entry_price:
+            # For demand zones: price approaches from ABOVE, triggers buy entry above zone
+            # Must confirm price came from above the zone first
+            if (current_candle['high'] >= entry_price and 
+                current_candle['low'] <= zone_high):  # Confirms approach from above
                 can_enter = True
         elif direction == 'SELL':
-            # For supply zones: price must reach the front-run level below zone
-            if current_candle['low'] <= entry_price:
+            # For supply zones: price approaches from BELOW, triggers sell entry below zone
+            # Must confirm price came from below the zone first
+            if (current_candle['low'] <= entry_price and 
+                current_candle['high'] >= zone_low):  # Confirms approach from below
                 can_enter = True
         
         # Calculate position size using UPDATED risk config

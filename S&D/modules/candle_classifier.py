@@ -64,7 +64,6 @@ class CandleClassifier:
         Returns:
             DataFrame with additional 'candle_type' column
         """
-        print("🔍 Classifying candles...")
         
         # Apply classification to each row
         self.data['candle_type'] = self.data.apply(
@@ -79,10 +78,6 @@ class CandleClassifier:
         # Store classifications for analysis
         self.classifications = self.data['candle_type'].value_counts()
         
-        print(f"✅ Classification complete:")
-        print(f"   Base candles: {self.classifications.get('base', 0)}")
-        print(f"   Decisive candles: {self.classifications.get('decisive', 0)}")
-        print(f"   Explosive candles: {self.classifications.get('explosive', 0)}")
         
         return self.data.copy()
     

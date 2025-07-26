@@ -70,15 +70,7 @@ class ZoneDetector:
             validation_report = self.validate_zone_uniqueness()
             
             print(f"✅ Zone detection complete:")
-            print(f"   D-B-D patterns: {len(dbd_patterns)} (momentum)")
-            print(f"   R-B-R patterns: {len(rbr_patterns)} (momentum)")
-            print(f"   D-B-R patterns: {len(dbr_patterns)} (reversal)")
-            print(f"   R-B-D patterns: {len(rbd_patterns)} (reversal)")
-            print(f"   🔍 VALIDATION RESULTS:")
-            print(f"      Unique base sequences: {validation_report['unique_base_sequences']}")
-            print(f"      Overlapping zones: {validation_report['overlapping_zones_detected']}")
-            print(f"      Leg-out violations: {validation_report['leg_out_violations']}")
-            print(f"      ✅ Fixes working: {validation_report['validation_passed']}")
+            print(f"   D-B-D: {len(dbd_patterns)}, R-B-R: {len(rbr_patterns)}, D-B-R: {len(dbr_patterns)}, R-B-D: {len(rbd_patterns)}")
             
             return {
                 'dbd_patterns': dbd_patterns,
@@ -112,7 +104,7 @@ class ZoneDetector:
                 if not base_sequence:
                     continue
                 
-                # CRITICAL FIX: Check if this base sequence already used
+                # CORRECTED FIX: Only check base sequence reuse (the original working approach)
                 base_sequence_id = base_sequence['base_sequence_id']
                 if base_sequence_id in self.used_base_sequences:
                     continue  # Skip - this base sequence already created a zone
@@ -164,7 +156,7 @@ class ZoneDetector:
                 if not base_sequence:
                     continue
                 
-                # CRITICAL FIX: Check if this base sequence already used
+                # CORRECTED FIX: Only check base sequence reuse (the original working approach)
                 base_sequence_id = base_sequence['base_sequence_id']
                 if base_sequence_id in self.used_base_sequences:
                     continue  # Skip - this base sequence already created a zone
@@ -220,7 +212,7 @@ class ZoneDetector:
                 if not leg_out:
                     continue
                 
-                # CRITICAL FIX: Check if this base sequence already used
+                # CORRECTED FIX: Only check base sequence reuse (the original working approach)
                 base_sequence_id = base_sequence['base_sequence_id']
                 if base_sequence_id in self.used_base_sequences:
                     continue  # Skip - this base sequence already created a zone
@@ -270,7 +262,7 @@ class ZoneDetector:
                 if not leg_out:
                     continue
                 
-                # CRITICAL FIX: Check if this base sequence already used
+                # CORRECTED FIX: Only check base sequence reuse (the original working approach)
                 base_sequence_id = base_sequence['base_sequence_id']
                 if base_sequence_id in self.used_base_sequences:
                     continue  # Skip - this base sequence already created a zone
@@ -525,51 +517,43 @@ class ZoneDetector:
             # CORRECTED LOGIC: Check approach direction before applying penetration rules
             for i, (date_idx, candle) in enumerate(candles_to_check.iterrows()):
                 
-                if zone_type in ['R-B-R', 'D-B-R']:  # Demand zones (expect approach from ABOVE)
+                if zone_type in ['R-B-R', 'D-B-R']:  # Demand zones (bullish leg-out)
                     
-                    # CORRECTED DEMAND ZONE LOGIC: Price approaches from ABOVE (same direction as formation)
-                    # Demand zones formed by upward leg-out → Price returns from above
+                    # CORRECTED DEMAND ZONE LOGIC: 
+                    # Demand zones have BULLISH leg-out → Price approaches from ABOVE
+                    # We only test when price comes back DOWN to the zone from above
                     
-                    # Check if price is approaching the zone from above (correct direction)
+                    # Check if price is approaching the zone from above (natural retracement)
                     is_approaching_from_above = (
-                        candle['high'] >= zone_low and   # Price reached zone level from above
-                        candle['close'] <= zone_high     # Close is at or below zone top
+                        candle['low'] <= zone_high and      # Price has reached zone from above
+                        candle['high'] >= zone_low          # Price is within or touching zone range
                     )
                     
                     if is_approaching_from_above:
-                        # Rule 1: 33% close penetration from BOTTOM of zone (entry point)
-                        close_test_level = zone_low + (zone_size * 0.33)
-                        if candle['close'] < close_test_level:
-                            return False, f"Demand zone tested on {date_idx.strftime('%Y-%m-%d')} - close {candle['close']:.5f} below 33% level {close_test_level:.5f}"
-                        
-                        # Rule 2: 50% wick penetration from BOTTOM of zone
-                        wick_test_level = zone_low + (zone_size * 0.50)
+                        # Single Rule: 33% wick penetration through BOTTOM of zone
+                        wick_test_level = zone_low + (zone_size * 0.33)
                         if candle['low'] < wick_test_level:
-                            return False, f"Demand zone deeply penetrated on {date_idx.strftime('%Y-%m-%d')} - low {candle['low']:.5f} below 50% level {wick_test_level:.5f}"
+                            return False, f"Demand zone tested on {date_idx.strftime('%Y-%m-%d')} - wick penetrated 33% level at {wick_test_level:.5f} (low: {candle['low']:.5f})"
                     
                     # If price is completely above zone, ignore (not yet approaching)
                         
-                elif zone_type in ['D-B-D', 'R-B-D']:  # Supply zones (expect approach from BELOW)
+                elif zone_type in ['D-B-D', 'R-B-D']:  # Supply zones (bearish leg-out)
                     
-                    # CORRECTED SUPPLY ZONE LOGIC: Price approaches from BELOW (same direction as formation)
-                    # Supply zones formed by downward leg-out → Price returns from below
+                    # CORRECTED SUPPLY ZONE LOGIC:
+                    # Supply zones have BEARISH leg-out → Price approaches from BELOW
+                    # We only test when price comes back UP to the zone from below
                     
-                    # Check if price is approaching the zone from below (correct direction)
+                    # Check if price is approaching the zone from below (natural retracement)
                     is_approaching_from_below = (
-                        candle['low'] <= zone_high and  # Price reached zone level from below
-                        candle['close'] >= zone_low     # Close is at or above zone bottom
+                        candle['high'] >= zone_low and      # Price has reached zone from below
+                        candle['low'] <= zone_high          # Price is within or touching zone range
                     )
                     
                     if is_approaching_from_below:
-                        # Rule 1: 33% close penetration from TOP of zone (entry point)
-                        close_test_level = zone_high - (zone_size * 0.33)
-                        if candle['close'] > close_test_level:
-                            return False, f"Supply zone tested on {date_idx.strftime('%Y-%m-%d')} - close {candle['close']:.5f} above 33% level {close_test_level:.5f}"
-                        
-                        # Rule 2: 50% wick penetration from TOP of zone
-                        wick_test_level = zone_high - (zone_size * 0.50)
+                        # Single Rule: 33% wick penetration through TOP of zone
+                        wick_test_level = zone_high - (zone_size * 0.33)
                         if candle['high'] > wick_test_level:
-                            return False, f"Supply zone deeply penetrated on {date_idx.strftime('%Y-%m-%d')} - high {candle['high']:.5f} above 50% level {wick_test_level:.5f}"
+                            return False, f"Supply zone tested on {date_idx.strftime('%Y-%m-%d')} - wick penetrated 33% level at {wick_test_level:.5f} (high: {candle['high']:.5f})"
                     
                     # If price is completely below zone, ignore (not yet approaching)
                 
@@ -593,7 +577,7 @@ class ZoneDetector:
             if col not in data.columns:
                 raise ValueError(f"Missing required column: {col}")
         
-        if len(data) < 10:
+        if len(data) < 5:
             raise ValueError("Insufficient data for pattern detection")
 
     def validate_zone_uniqueness(self) -> Dict:
