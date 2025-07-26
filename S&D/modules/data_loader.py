@@ -21,7 +21,7 @@ class DataLoader:
         """
         
         
-# First try direct OANDA format matching
+        # First try direct OANDA format matching
         files = self.list_available_files()
         target_file = None
         
@@ -236,10 +236,8 @@ class DataLoader:
         successful_parses = parsed_dates.notna().sum()
         total_dates = len(date_series)
         success_rate = (successful_parses / total_dates) * 100
-        
-        if success_rate < 95:
-        
-            return parsed_dates
+            
+        return parsed_dates
 
     def validate_data_quality(self, data: pd.DataFrame) -> bool:
         """
@@ -278,26 +276,21 @@ class DataLoader:
             violation_pct = (violation_count / total_count) * 100
             
             if violation_pct > 5:  # Only fail if >5% of data has violations
-                print(f"❌ Too many open price violations: {violation_count}/{total_count} ({violation_pct:.1f}%)")
                 return False
-            else:
         
-                # Check for extreme close price violations (more than 1% outside range)  
-                close_violations = ((data['close'] > data['high'] + 0.01 * high_low_range) | 
-                                (data['close'] < data['low'] - 0.01 * high_low_range))
-                
-                if close_violations.any():
-                    violation_count = close_violations.sum()
-                    total_count = len(data)
-                    violation_pct = (violation_count / total_count) * 100
-                    
-                    if violation_pct > 5:  # Only fail if >5% of data has violations
-                        print(f"❌ Too many close price violations: {violation_count}/{total_count} ({violation_pct:.1f}%)")
-                        return False
-                    else:
-                        print(f"⚠️  Minor close price violations: {violation_count}/{total_count} ({violation_pct:.1f}%) - acceptable")
-                
-                return True
+        # Check for extreme close price violations (more than 1% outside range)  
+        close_violations = ((data['close'] > data['high'] + 0.01 * high_low_range) | 
+                           (data['close'] < data['low'] - 0.01 * high_low_range))
+        
+        if close_violations.any():
+            violation_count = close_violations.sum()
+            total_count = len(data)
+            violation_pct = (violation_count / total_count) * 100
+            
+            if violation_pct > 5:  # Only fail if >5% of data has violations
+                return False
+        
+        return True
     
     def list_available_files(self) -> List[str]:
         """
