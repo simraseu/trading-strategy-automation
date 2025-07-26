@@ -127,8 +127,6 @@ class ZoneAccuracyValidator:
                     'error': str(e)
                 }
         
-        # Generate summary report
-        self.generate_zone_accuracy_report(validation_results)
         
         return validation_results
     
@@ -192,61 +190,6 @@ class ZoneAccuracyValidator:
             df.to_csv(filepath, index=False)
             print(f"   📁 Manual validation export: {filepath}")
         
-    def generate_zone_accuracy_report(self, results):
-        """Generate comprehensive zone accuracy validation report"""
-        
-        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        report_file = f"validation_tests/zone_accuracy_report_{timestamp}.txt"
-        
-        with open(report_file, 'w', encoding='utf-8') as f:
-            f.write("ZONE DETECTION ACCURACY VALIDATION REPORT\n")
-            f.write("=" * 60 + "\n")
-            f.write(f"Generated: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n")
-            f.write("Objective: Validate >=95% zone detection accuracy\n\n")
-            
-            successful_tests = 0
-            total_patterns = 0
-            
-            for test_key, result in results.items():
-                f.write(f"\n📊 TEST: {result['pair']} {result['timeframe']}\n")
-                f.write("-" * 40 + "\n")
-                
-                if result['status'] == 'READY_FOR_MANUAL_VALIDATION':
-                    successful_tests += 1
-                    total_patterns += result['total_patterns']
-                    
-                    f.write(f"Status: ✅ READY FOR MANUAL VALIDATION\n")
-                    f.write(f"Candles processed: {result['candles_processed']:,}\n")
-                    f.write(f"Total patterns: {result['total_patterns']}\n")
-                    f.write(f"D-B-D patterns: {result['dbd_patterns']}\n")
-                    f.write(f"R-B-R patterns: {result['rbr_patterns']}\n")
-                    f.write(f"D-B-R patterns: {result['dbr_patterns']}\n")
-                    f.write(f"R-B-D patterns: {result['rbd_patterns']}\n")
-                    f.write(f"Validation file: {result['validation_file']}\n")
-                    
-                else:
-                    f.write(f"Status: ❌ {result['status']}\n")
-                    if 'error' in result:
-                        f.write(f"Error: {result['error']}\n")
-            
-            # Summary statistics
-            f.write(f"\n🎯 VALIDATION SUMMARY\n")
-            f.write("=" * 30 + "\n")
-            f.write(f"Successful tests: {successful_tests}/{len(results)}\n")
-            f.write(f"Total patterns for validation: {total_patterns:,}\n")
-            f.write(f"Success rate: {successful_tests/len(results)*100:.1f}%\n")
-            
-            f.write(f"\n📋 NEXT STEPS\n")
-            f.write("-" * 15 + "\n")
-            f.write("1. Manually validate exported CSV files\n")
-            f.write("2. Update 'manual_validation' column (CORRECT/INCORRECT)\n")
-            f.write("3. Add notes in 'validation_notes' column\n")
-            f.write("4. Run accuracy calculation after manual review\n")
-            f.write("5. Target: >=95% accuracy for production readiness\n")
-        
-        print(f"\n📁 VALIDATION REPORT SAVED: {report_file}")
-        print(f"🎯 Ready for manual validation: {successful_tests} test datasets")
-        print(f"📊 Total patterns to validate: {total_patterns:,}")
 
 def main():
     """Main execution function"""
