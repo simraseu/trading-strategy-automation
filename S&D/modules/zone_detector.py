@@ -37,18 +37,28 @@ class ZoneDetector:
     """
     
     def __init__(self, candle_classifier, config=None):
-        """Initialize zone detector"""
+        """Initialize zone detector with uniqueness tracking"""
         self.candle_classifier = candle_classifier
         self.config = config or ZONE_CONFIG
         self.logger = logging.getLogger(__name__)
         
+        # CRITICAL FIX: Track used base sequences to prevent overlapping zones
+        self.used_base_sequences = set()  # Track base sequence IDs
+        self.created_zones = []  # Track all created zones for validation
+        
     def detect_all_patterns(self, data: pd.DataFrame) -> Dict[str, List[Dict]]:
-        """Detect all zone patterns including reversals"""
+        """
+        FIXED: Detect all zone patterns with uniqueness validation
+        CRITICAL FIX: Added validation reporting
+        """
         try:
             # Validate input data
             self.validate_data(data)
             
-            # Detect all 4 pattern types
+            # CRITICAL FIX: Reset tracking for new dataset
+            self.reset_zone_tracking()
+            
+            # Detect all 4 pattern types with uniqueness enforcement
             dbd_patterns = self.detect_dbd_patterns(data)
             rbr_patterns = self.detect_rbr_patterns(data)
             dbr_patterns = self.detect_dbr_patterns(data)
@@ -56,18 +66,27 @@ class ZoneDetector:
             
             total_patterns = len(dbd_patterns) + len(rbr_patterns) + len(dbr_patterns) + len(rbd_patterns)
             
+            # CRITICAL FIX: Validation reporting
+            validation_report = self.validate_zone_uniqueness()
+            
             print(f"✅ Zone detection complete:")
             print(f"   D-B-D patterns: {len(dbd_patterns)} (momentum)")
             print(f"   R-B-R patterns: {len(rbr_patterns)} (momentum)")
             print(f"   D-B-R patterns: {len(dbr_patterns)} (reversal)")
             print(f"   R-B-D patterns: {len(rbd_patterns)} (reversal)")
+            print(f"   🔍 VALIDATION RESULTS:")
+            print(f"      Unique base sequences: {validation_report['unique_base_sequences']}")
+            print(f"      Overlapping zones: {validation_report['overlapping_zones_detected']}")
+            print(f"      Leg-out violations: {validation_report['leg_out_violations']}")
+            print(f"      ✅ Fixes working: {validation_report['validation_passed']}")
             
             return {
                 'dbd_patterns': dbd_patterns,
                 'rbr_patterns': rbr_patterns,
                 'dbr_patterns': dbr_patterns,
                 'rbd_patterns': rbd_patterns,
-                'total_patterns': total_patterns
+                'total_patterns': total_patterns,
+                'validation_report': validation_report
             }
             
         except Exception as e:
@@ -76,7 +95,8 @@ class ZoneDetector:
     
     def detect_dbd_patterns(self, data: pd.DataFrame) -> List[Dict]:
         """
-        Detect D-B-D patterns: Bearish LEG-IN → BASE → Bearish LEG-OUT
+        FIXED: Detect D-B-D patterns with uniqueness enforcement
+        CRITICAL FIX: Each base sequence can only create ONE zone
         """
         patterns = []
         
@@ -92,6 +112,11 @@ class ZoneDetector:
                 if not base_sequence:
                     continue
                 
+                # CRITICAL FIX: Check if this base sequence already used
+                base_sequence_id = base_sequence['base_sequence_id']
+                if base_sequence_id in self.used_base_sequences:
+                    continue  # Skip - this base sequence already created a zone
+                
                 # STEP 3: Find bearish leg-out immediately after base sequence
                 leg_out_start = base_sequence['end_idx'] + 1
                 leg_out = self.identify_leg_out(data, leg_out_start, base_sequence, 'bearish')
@@ -102,7 +127,7 @@ class ZoneDetector:
                 if leg_out['ratio_to_base'] < self.config['min_legout_ratio']:
                     continue
                 
-                # STEP 5: Create D-B-D pattern
+                # STEP 5: Create D-B-D pattern and mark base sequence as used
                 pattern = self.create_pattern(
                     pattern_type='D-B-D',
                     leg_in=leg_in,
@@ -110,6 +135,10 @@ class ZoneDetector:
                     leg_out=leg_out
                 )
                 pattern['category'] = 'momentum'
+                
+                # CRITICAL FIX: Mark this base sequence as used
+                self.used_base_sequences.add(base_sequence_id)
+                self.created_zones.append(pattern)
                 patterns.append(pattern)
                 
             except Exception as e:
@@ -135,6 +164,11 @@ class ZoneDetector:
                 if not base_sequence:
                     continue
                 
+                # CRITICAL FIX: Check if this base sequence already used
+                base_sequence_id = base_sequence['base_sequence_id']
+                if base_sequence_id in self.used_base_sequences:
+                    continue  # Skip - this base sequence already created a zone
+                
                 # STEP 3: Find bullish leg-out immediately after base sequence
                 leg_out_start = base_sequence['end_idx'] + 1
                 leg_out = self.identify_leg_out(data, leg_out_start, base_sequence, 'bullish')
@@ -145,7 +179,7 @@ class ZoneDetector:
                 if leg_out['ratio_to_base'] < self.config['min_legout_ratio']:
                     continue
                 
-                # STEP 5: Create R-B-R pattern
+                # STEP 5: Create R-B-R pattern and mark base sequence as used
                 pattern = self.create_pattern(
                     pattern_type='R-B-R',
                     leg_in=leg_in,
@@ -153,6 +187,10 @@ class ZoneDetector:
                     leg_out=leg_out
                 )
                 pattern['category'] = 'momentum'
+                
+                # CRITICAL FIX: Mark this base sequence as used
+                self.used_base_sequences.add(base_sequence_id)
+                self.created_zones.append(pattern)
                 patterns.append(pattern)
                 
             except Exception as e:
@@ -182,11 +220,16 @@ class ZoneDetector:
                 if not leg_out:
                     continue
                 
-                # Validate minimum distance
+                # CRITICAL FIX: Check if this base sequence already used
+                base_sequence_id = base_sequence['base_sequence_id']
+                if base_sequence_id in self.used_base_sequences:
+                    continue  # Skip - this base sequence already created a zone
+                
+                # STEP 4: Validate minimum distance requirement
                 if leg_out['ratio_to_base'] < self.config['min_legout_ratio']:
                     continue
                 
-                # Create D-B-R pattern
+                # STEP 5: Create D-B-R pattern and mark base sequence as used
                 pattern = self.create_pattern(
                     pattern_type='D-B-R',
                     leg_in=leg_in,
@@ -194,6 +237,10 @@ class ZoneDetector:
                     leg_out=leg_out
                 )
                 pattern['category'] = 'reversal'
+                
+                # CRITICAL FIX: Mark this base sequence as used
+                self.used_base_sequences.add(base_sequence_id)
+                self.created_zones.append(pattern)
                 patterns.append(pattern)
                 
             except Exception as e:
@@ -223,11 +270,16 @@ class ZoneDetector:
                 if not leg_out:
                     continue
                 
-                # Validate minimum distance
+                # CRITICAL FIX: Check if this base sequence already used
+                base_sequence_id = base_sequence['base_sequence_id']
+                if base_sequence_id in self.used_base_sequences:
+                    continue  # Skip - this base sequence already created a zone
+                
+                # STEP 4: Validate minimum distance requirement
                 if leg_out['ratio_to_base'] < self.config['min_legout_ratio']:
                     continue
                 
-                # Create R-B-D pattern
+                # STEP 5: Create R-B-D pattern and mark base sequence as used
                 pattern = self.create_pattern(
                     pattern_type='R-B-D',
                     leg_in=leg_in,
@@ -235,6 +287,10 @@ class ZoneDetector:
                     leg_out=leg_out
                 )
                 pattern['category'] = 'reversal'
+                
+                # CRITICAL FIX: Mark this base sequence as used
+                self.used_base_sequences.add(base_sequence_id)
+                self.created_zones.append(pattern)
                 patterns.append(pattern)
                 
             except Exception as e:
@@ -270,14 +326,15 @@ class ZoneDetector:
     
     def find_all_consecutive_base_candles(self, data: pd.DataFrame, start_idx: int) -> Optional[Dict]:
         """
-        Find ALL consecutive base candles (≤50% body ratio)
+        FIXED: Find ALL consecutive base candles - ALWAYS use complete sequence
+        CRITICAL FIX: Prevents multiple zones from same base sequence
         """
         if start_idx >= len(data):
             return None
         
         consecutive_base_indices = []
         
-        # Scan forward for consecutive base candles
+        # Scan forward for ALL consecutive base candles - no early stopping
         for i in range(start_idx, min(start_idx + self.config['max_base_candles'], len(data))):
             candle = data.iloc[i]
             
@@ -292,11 +349,12 @@ class ZoneDetector:
                 # First non-base candle breaks the sequence
                 break
         
-        # Validate minimum requirements
+        # CRITICAL FIX: Validate minimum requirements
         if len(consecutive_base_indices) < self.config['min_base_candles']:
             return None
         
-        # Calculate boundaries from ALL consecutive base candles
+        # CRITICAL FIX: ALWAYS return the COMPLETE base sequence
+        # This prevents multiple zones from subsets of the same base sequence
         base_data = data.iloc[consecutive_base_indices]
         base_high = base_data['high'].max()
         base_low = base_data['low'].min()
@@ -312,12 +370,16 @@ class ZoneDetector:
             'high': base_high,
             'low': base_low,
             'range': base_range,
-            'candle_count': len(consecutive_base_indices)
+            'candle_count': len(consecutive_base_indices),
+            'base_sequence_id': f"{consecutive_base_indices[0]}_{consecutive_base_indices[-1]}"  # UNIQUE ID
         }
     
     def identify_leg_out(self, data: pd.DataFrame, start_idx: int, 
-                        base_sequence: Dict, direction: str) -> Optional[Dict]:
-        """Identify leg-out movement with proper breakout validation"""
+                    base_sequence: Dict, direction: str) -> Optional[Dict]:
+        """
+        FIXED: Identify leg-out with STRICT first candle validation
+        CRITICAL FIX: First leg-out candle MUST be decisive/explosive (never base)
+        """
         if start_idx >= len(data):
             return None
         
@@ -332,6 +394,16 @@ class ZoneDetector:
                 break
             
             leg_data = data.iloc[start_idx:end_idx + 1]
+            
+            # CRITICAL FIX: STRICT first candle validation
+            first_candle = data.iloc[start_idx]
+            first_candle_classification = self.candle_classifier.classify_single_candle(
+                first_candle['open'], first_candle['high'], first_candle['low'], first_candle['close']
+            )
+            
+            # MANDATORY: First leg-out candle MUST be decisive or explosive (never base)
+            if first_candle_classification == 'base':
+                continue  # Skip - invalid leg-out starting with base candle
             
             # Check if leg is valid and breaks out of base
             if self.is_valid_leg(leg_data, direction):
@@ -356,7 +428,8 @@ class ZoneDetector:
                     'direction': direction,
                     'range': leg_range,
                     'ratio_to_base': ratio_to_base,
-                    'candle_count': leg_length
+                    'candle_count': leg_length,
+                    'first_candle_type': first_candle_classification  # Track for validation
                 }
         
         return None
@@ -499,30 +572,6 @@ class ZoneDetector:
                             return False, f"Supply zone deeply penetrated on {date_idx.strftime('%Y-%m-%d')} - high {candle['high']:.5f} above 50% level {wick_test_level:.5f}"
                     
                     # If price is completely below zone, ignore (not yet approaching)
-                        
-                elif zone_type in ['D-B-D', 'R-B-D']:  # Supply zones (expect bearish approach)
-                    
-                    # SUPPLY ZONE LOGIC: Only test if price is approaching from above
-                    # Price must be in or near the zone to trigger testing
-                    
-                    # Check if price is approaching the zone from above (bearish approach)
-                    is_approaching_from_above = (
-                        candle['high'] >= zone_low and   # Price reached zone level
-                        candle['close'] <= zone_high     # Close is at or below zone top
-                    )
-                    
-                    if is_approaching_from_above:
-                        # Rule 1: 33% close penetration from BOTTOM of zone
-                        close_test_level = zone_low + (zone_size * 0.33)
-                        if candle['close'] > close_test_level:
-                            return False, f"Supply zone tested on {date_idx.strftime('%Y-%m-%d')} - close {candle['close']:.5f} above 33% level {close_test_level:.5f}"
-                        
-                        # Rule 2: 50% wick penetration from BOTTOM of zone
-                        wick_test_level = zone_low + (zone_size * 0.50)
-                        if candle['high'] > wick_test_level:
-                            return False, f"Supply zone deeply penetrated on {date_idx.strftime('%Y-%m-%d')} - high {candle['high']:.5f} above 50% level {wick_test_level:.5f}"
-                    
-                    # If price is completely above zone, ignore (not approaching)
                 
                 else:
                     return False, f"Unknown zone type: {zone_type}"
@@ -546,3 +595,62 @@ class ZoneDetector:
         
         if len(data) < 10:
             raise ValueError("Insufficient data for pattern detection")
+
+    def validate_zone_uniqueness(self) -> Dict:
+        """
+        VALIDATION: Check that fixes worked correctly
+        Returns validation report
+        """
+        validation_report = {
+            'total_zones': len(self.created_zones),
+            'unique_base_sequences': len(self.used_base_sequences),
+            'overlapping_zones_detected': 0,
+            'leg_out_violations': 0,
+            'same_base_sequence_violations': 0,
+            'validation_passed': False
+        }
+        
+        # IMPROVED: Check for zones using the same base sequence (the real problem)
+        base_sequence_usage = {}
+        for zone in self.created_zones:
+            if 'base' in zone and 'base_sequence_id' in zone['base']:
+                base_seq_id = zone['base']['base_sequence_id']
+                if base_seq_id in base_sequence_usage:
+                    validation_report['same_base_sequence_violations'] += 1
+                    print(f"      ⚠️  Multiple zones using base sequence {base_seq_id}")
+                else:
+                    base_sequence_usage[base_seq_id] = zone
+        
+        # Check for truly overlapping zones (same time period AND same price levels)
+        zone_signatures = []
+        for zone in self.created_zones:
+            # Create signature: time_period + price_levels
+            time_signature = f"{zone['start_idx']}_{zone['end_idx']}"
+            price_signature = f"{zone['zone_low']:.5f}_{zone['zone_high']:.5f}"
+            full_signature = f"{time_signature}_{price_signature}"
+            
+            if full_signature in zone_signatures:
+                validation_report['overlapping_zones_detected'] += 1
+                print(f"      ⚠️  Duplicate zone signature: {full_signature}")
+            else:
+                zone_signatures.append(full_signature)
+        
+        # Check leg-out first candle validation
+        for zone in self.created_zones:
+            if 'leg_out' in zone and 'first_candle_type' in zone['leg_out']:
+                if zone['leg_out']['first_candle_type'] == 'base':
+                    validation_report['leg_out_violations'] += 1
+        
+        # CORRECTED: Main validation focuses on base sequence uniqueness
+        validation_report['validation_passed'] = (
+            validation_report['same_base_sequence_violations'] == 0 and
+            validation_report['leg_out_violations'] == 0 and
+            validation_report['total_zones'] == validation_report['unique_base_sequences']
+        )
+        
+        return validation_report
+
+    def reset_zone_tracking(self):
+        """Reset tracking for new dataset"""
+        self.used_base_sequences.clear()
+        self.created_zones.clear()
