@@ -98,7 +98,6 @@ class CoreBacktestEngine:
         
         print(f"✅ INITIALIZATION COMPLETE:")
         print(f"   🔧 Updated modules: CandleClassifier, ZoneDetector, TrendClassifier")
-        print(f"   ⚙️  Current leg-out ratio: {ZONE_CONFIG['min_legout_ratio']}x (from settings.py)")
         print(f"   🔄 Parallel workers: {self.max_workers} (optimized)")
         print(f"   💾 Memory threshold: {self.memory_threshold*100:.0f}%")
         print(f"   📊 Analysis periods: {len(ANALYSIS_PERIODS)} configured")
@@ -190,13 +189,6 @@ class CoreBacktestEngine:
             data = self.load_data_with_validation(pair, timeframe, days_back)
             if data is None:
                 return self.create_empty_result(pair, timeframe, "Insufficient data")
-            # Add this right after: data = self.load_data_with_validation(pair, timeframe, days_back)
-            print(f"\n🔍 DATA STRUCTURE DEBUG:")
-            print(f"   Data shape: {data.shape}")
-            print(f"   Data index type: {type(data.index[0])}")
-            print(f"   First 3 dates: {data.index[:3].tolist()}")
-            print(f"   Last 3 dates: {data.index[-3:].tolist()}")
-            print(f"   Date range: {data.index[0]} to {data.index[-1]}")
             
             # Initialize components using YOUR UPDATED MODULES
             candle_classifier = CandleClassifier(data)
@@ -232,14 +224,14 @@ class CoreBacktestEngine:
         
         print(f"   📊 Found {len(all_patterns)} total patterns")
         
-        # CRITICAL FIX: Use ALL formed patterns - NO future data filtering
+        # REALISTIC: Trade ALL formed zones without knowing which will work
         valid_patterns = [
             pattern for pattern in all_patterns
-            if pattern.get('end_idx') is not None  # Only need basic formation
+            if pattern.get('end_idx') is not None  # All properly formed zones
         ]
 
-        print(f"   🎯 Using {len(valid_patterns)} patterns WITHOUT future data filtering")
-        
+        print(f"   🎯 Using {len(valid_patterns)} patterns (realistic - no hindsight)")   
+
         if not valid_patterns:
             total_zones = len(all_patterns)
             valid_count = len(valid_patterns)
@@ -918,7 +910,6 @@ def main():
         print(f"   Win Rate: {result['win_rate']:.1f}%")
         print(f"   Profit Factor: {result['profit_factor']:.2f}")
         print(f"   Total Return: {result['total_return']:.2f}%")
-        print(f"   Leg-out threshold: {result['leg_out_threshold']}x (from settings.py)")
         
         if result['total_trades'] == 0:
             print(f"   Issue: {result['description']}")
