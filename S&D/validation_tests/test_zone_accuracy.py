@@ -81,19 +81,24 @@ class ZoneAccuracyValidator:
                 if days_back < len(data):
                     data = data.iloc[-days_back:]
                 
-                # Run zone detection
+                # Run zone detection with 2.5x validation
                 candle_classifier = CandleClassifier(data)
                 classified_data = candle_classifier.classify_all_candles()
                 
                 zone_detector = ZoneDetector(candle_classifier)
                 zones = zone_detector.detect_all_patterns(classified_data)
                 
-                # Calculate metrics
+                # Calculate metrics including validation data
                 total_patterns = zones['total_patterns']
                 dbd_count = len(zones['dbd_patterns'])
                 rbr_count = len(zones['rbr_patterns'])
                 dbr_count = len(zones.get('dbr_patterns', []))
                 rbd_count = len(zones.get('rbd_patterns', []))
+                
+                # NEW: 2.5x validation metrics
+                validated_count = zones.get('validated_zones', 0)
+                invalidated_count = zones.get('invalidated_zones', 0)
+                pending_count = zones.get('pending_zones', 0)
                 
                 # Export for manual validation
                 validation_file = f"validation_{pair}_{timeframe}_{days_back}d.csv"
@@ -110,12 +115,21 @@ class ZoneAccuracyValidator:
                     'rbr_patterns': rbr_count,
                     'dbr_patterns': dbr_count,
                     'rbd_patterns': rbd_count,
+                    
+                    # NEW: 2.5x validation metrics
+                    'validated_zones': validated_count,
+                    'invalidated_zones': invalidated_count,
+                    'pending_zones': pending_count,
+                    'validation_rate': f"{(validated_count/total_patterns)*100:.1f}%" if total_patterns > 0 else "0%",
+                    
                     'validation_file': validation_file,
                     'status': 'READY_FOR_MANUAL_VALIDATION'
                 }
                 
                 print(f"   ✅ Patterns detected: {total_patterns}")
                 print(f"   📊 D-B-D: {dbd_count}, R-B-R: {rbr_count}, D-B-R: {dbr_count}, R-B-D: {rbd_count}")
+                print(f"   🎯 2.5x Validation: {validated_count} validated, {invalidated_count} invalidated, {pending_count} pending")
+                print(f"   📈 Validation rate: {(validated_count/total_patterns)*100:.1f}%" if total_patterns > 0 else "   📈 Validation rate: 0%")
                 print(f"   📁 Validation file: {validation_file}")
                 
             except Exception as e:
@@ -169,12 +183,16 @@ class ZoneAccuracyValidator:
                             'zone_range': zone['zone_range'],
                             'leg_in_candles': zone['leg_in']['candle_count'],
                             'base_candles': zone['base']['candle_count'],
-                            'leg_out_candles': zone['leg_out']['candle_count'],
-                            'leg_out_ratio': zone['leg_out']['ratio_to_base'],
-                            'start_idx': zone['start_idx'],
-                            'end_idx': zone['end_idx'],
-                            'manual_validation': '',  # Empty for manual entry
-                            'validation_notes': ''    # Empty for manual notes
+                            'leg_out_candles': zone['leg_out']['candle_count'],                            
+                            # NEW: 2.5x validation data
+                            'immediate_leg_out_ratio': zone.get('immediate_leg_out_ratio', zone['leg_out']['ratio_to_base']),
+                            'maximum_distance_ratio': zone.get('maximum_distance_ratio', 'N/A'),
+                            'target_2_5x_price': zone.get('target_2_5x_price', 'N/A'),
+                            'target_2_5x_hit': zone.get('target_2_5x_hit', False),
+                            'target_2_5x_date': zone.get('target_2_5x_date', 'N/A'),
+                            'validation_status': zone.get('zone_validation_status', 'UNKNOWN'),
+                            'invalidation_date': zone.get('invalidation_date', 'N/A'),
+                            'monitoring_candles': zone.get('monitoring_candles_count', 0),
                         }
                         
                         all_zones.append(zone_info)

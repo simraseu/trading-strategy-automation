@@ -48,8 +48,8 @@ class ZoneDetector:
         
     def detect_all_patterns(self, data: pd.DataFrame) -> Dict[str, List[Dict]]:
         """
-        FIXED: Detect all zone patterns with uniqueness validation
-        CRITICAL FIX: Added validation reporting
+        FIXED: Detect all zone patterns with uniqueness validation and 2.5x target monitoring
+        CRITICAL FIX: Added validation reporting and 2.5x target validation
         """
         try:
             # Validate input data
@@ -69,13 +69,53 @@ class ZoneDetector:
             print(f"✅ Zone detection complete:")
             print(f"   D-B-D: {len(dbd_patterns)}, R-B-R: {len(rbr_patterns)}, D-B-R: {len(dbr_patterns)}, R-B-D: {len(rbd_patterns)}")
             
-            return {
-                'dbd_patterns': dbd_patterns,
-                'rbr_patterns': rbr_patterns,
-                'dbr_patterns': dbr_patterns,
-                'rbd_patterns': rbd_patterns,
-                'total_patterns': total_patterns
-            }
+            # NEW: Add 2.5x validation to all patterns
+            if total_patterns > 0:
+                print(f"🎯 Validating zones with 2.5x target monitoring...")
+                
+                all_patterns = dbd_patterns + rbr_patterns + dbr_patterns + rbd_patterns
+                validated_patterns = []
+                
+                for pattern in all_patterns:
+                    validated_pattern = self.validate_zone_2_5x_target(pattern, data)
+                    validated_patterns.append(validated_pattern)
+                
+                # Split back into pattern types with validation data
+                validated_dbd = [p for p in validated_patterns if p['type'] == 'D-B-D']
+                validated_rbr = [p for p in validated_patterns if p['type'] == 'R-B-R']
+                validated_dbr = [p for p in validated_patterns if p['type'] == 'D-B-R']
+                validated_rbd = [p for p in validated_patterns if p['type'] == 'R-B-D']
+                
+                # Report validation statistics
+                validated_count = len([p for p in validated_patterns if p['target_2_5x_hit']])
+                invalidated_count = len([p for p in validated_patterns if p['zone_validation_status'] == 'INVALIDATED'])
+                pending_count = len([p for p in validated_patterns if p['zone_validation_status'] == 'PENDING'])
+                
+                print(f"   ✅ Zones reaching 2.5x target: {validated_count}/{total_patterns}")
+                print(f"   ❌ Zones invalidated: {invalidated_count}/{total_patterns}")
+                print(f"   ⏳ Zones pending: {pending_count}/{total_patterns}")
+                
+                return {
+                    'dbd_patterns': validated_dbd,
+                    'rbr_patterns': validated_rbr,
+                    'dbr_patterns': validated_dbr,
+                    'rbd_patterns': validated_rbd,
+                    'total_patterns': total_patterns,
+                    'validated_zones': validated_count,
+                    'invalidated_zones': invalidated_count,
+                    'pending_zones': pending_count
+                }
+            else:
+                return {
+                    'dbd_patterns': dbd_patterns,
+                    'rbr_patterns': rbr_patterns,
+                    'dbr_patterns': dbr_patterns,
+                    'rbd_patterns': rbd_patterns,
+                    'total_patterns': total_patterns,
+                    'validated_zones': 0,
+                    'invalidated_zones': 0,
+                    'pending_zones': 0
+                }
             
         except Exception as e:
             self.logger.error(f"Error in pattern detection: {str(e)}")
@@ -666,6 +706,132 @@ class ZoneDetector:
         except Exception as e:
             self.logger.error(f"Error in zone testing validation: {str(e)}")
             return False, f"Validation error: {str(e)}"
+
+    def validate_zone_2_5x_target(self, zone: Dict, data: pd.DataFrame) -> Dict:
+        """
+        Monitor price action after zone formation to validate 2.5x target
+        
+        Args:
+            zone: Zone dictionary with formation data
+            data: Full OHLC DataFrame with date index
+            
+        Returns:
+            Updated zone with validation status and monitoring data
+        """
+        try:
+            zone_high = zone['zone_high']
+            zone_low = zone['zone_low'] 
+            zone_range = zone_high - zone_low
+            zone_type = zone['type']
+            leg_out_end_idx = zone['leg_out']['end_idx']
+            
+            # Edge case: Zero zone range
+            if zone_range <= 0:
+                zone.update({
+                    'immediate_leg_out_ratio': zone['leg_out']['ratio_to_base'],
+                    'maximum_distance_ratio': zone['leg_out']['ratio_to_base'],
+                    'target_2_5x_price': None,
+                    'target_2_5x_hit': False,
+                    'target_2_5x_date': None,
+                    'zone_validation_status': 'INVALID_RANGE',
+                    'invalidation_date': None,
+                    'monitoring_candles_count': 0
+                })
+                return zone
+            
+            # Calculate 2.5x targets
+            if zone_type in ['D-B-D', 'R-B-D']:  # Supply zones (bearish leg-out)
+                target_2_5x = zone_low - (2.5 * zone_range)
+                direction = 'bearish'
+            else:  # Demand zones (bullish leg-out)
+                target_2_5x = zone_high + (2.5 * zone_range)
+                direction = 'bullish'
+            
+            # Initialize monitoring variables
+            max_ratio = zone['leg_out']['ratio_to_base']  # Start with immediate leg-out
+            target_hit = False
+            target_hit_date = None
+            invalidation_date = None
+            monitoring_count = 0
+            
+            # Monitor all candles after leg-out formation
+            start_monitor_idx = leg_out_end_idx + 1
+            
+            for i in range(start_monitor_idx, len(data)):
+                candle = data.iloc[i]
+                candle_date = data.index[i]
+                monitoring_count += 1
+                
+                # Calculate current distance ratio
+                if direction == 'bearish':
+                    current_distance = zone_low - candle['low']  # How far below zone_low
+                    current_ratio = current_distance / zone_range
+                    
+                    # Check for 2.5x target hit
+                    if candle['low'] <= target_2_5x and not target_hit:
+                        target_hit = True
+                        target_hit_date = candle_date
+                        
+                else:  # bullish
+                    current_distance = candle['high'] - zone_high  # How far above zone_high
+                    current_ratio = current_distance / zone_range
+                    
+                    # Check for 2.5x target hit
+                    if candle['high'] >= target_2_5x and not target_hit:
+                        target_hit = True
+                        target_hit_date = candle_date
+                
+                # Update maximum ratio achieved
+                if current_ratio > max_ratio:
+                    max_ratio = current_ratio
+                
+                # Check for zone invalidation (price returns to zone before hitting 2.5x)
+                if not target_hit:
+                    zone_invalidated, invalidation_reason = self.check_zone_testing(zone, data, candle_date)
+                    if not zone_invalidated:  # check_zone_testing returns False when zone is tested/invalidated
+                        invalidation_date = candle_date
+                        break
+                
+                # Stop monitoring if target hit
+                if target_hit:
+                    break
+            
+            # Determine final validation status
+            if target_hit:
+                validation_status = 'VALIDATED'
+            elif invalidation_date:
+                validation_status = 'INVALIDATED'
+            else:
+                validation_status = 'PENDING'  # Never hit target, never invalidated
+            
+            # Update zone with validation data
+            zone.update({
+                'immediate_leg_out_ratio': zone['leg_out']['ratio_to_base'],
+                'maximum_distance_ratio': max_ratio,
+                'target_2_5x_price': target_2_5x,
+                'target_2_5x_hit': target_hit,
+                'target_2_5x_date': target_hit_date,
+                'zone_validation_status': validation_status,
+                'invalidation_date': invalidation_date,
+                'monitoring_candles_count': monitoring_count
+            })
+            
+            return zone
+            
+        except Exception as e:
+            self.logger.error(f"Error in 2.5x validation: {str(e)}")
+            # Add error status to zone
+            zone.update({
+                'immediate_leg_out_ratio': zone['leg_out']['ratio_to_base'],
+                'maximum_distance_ratio': zone['leg_out']['ratio_to_base'],
+                'target_2_5x_price': None,
+                'target_2_5x_hit': False,
+                'target_2_5x_date': None,
+                'zone_validation_status': 'ERROR',
+                'invalidation_date': None,
+                'monitoring_candles_count': 0
+            })
+            return zone
     
     def validate_data(self, data: pd.DataFrame) -> None:
         """Validate input data"""

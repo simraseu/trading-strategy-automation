@@ -1,3 +1,3 @@
-pair,timeframe,pattern_type,zone_start_date,zone_end_date,base_start_date,base_end_date,zone_high,zone_low,zone_range,leg_in_candles,base_candles,leg_out_candles,leg_out_ratio,start_idx,end_idx,manual_validation,validation_notes
-AUDUSD,3D,D-B-D,12/04/2022,20/04/2022,17/04/2022,17/04/2022,0.74583,0.73429,0.011539999999999995,1,1,1,2.817944250871068,79,81,,
-AUDUSD,3D,D-B-D,17/03/2025,02/04/2025,20/03/2025,30/03/2025,0.6389,0.62189,0.01700999999999997,1,3,1,3.735462735462756,335,339,,
+pair,timeframe,pattern_type,zone_start_date,zone_end_date,base_start_date,base_end_date,zone_high,zone_low,zone_range,leg_in_candles,base_candles,leg_out_candles,immediate_leg_out_ratio,maximum_distance_ratio,target_2_5x_price,target_2_5x_hit,target_2_5x_date,validation_status,invalidation_date,monitoring_candles
+AUDUSD,3D,D-B-D,12/04/2022,20/04/2022,17/04/2022,17/04/2022,0.74583,0.73429,0.011539999999999995,1,1,1,2.817944250871068,2.817944250871068,0.7054400000000001,True,2022-04-28 21:00:00,VALIDATED,,2
+AUDUSD,3D,D-B-D,17/03/2025,02/04/2025,20/03/2025,30/03/2025,0.6389,0.62189,0.01700999999999997,1,3,1,3.735462735462756,3.735462735462756,0.5793650000000001,False,,INVALIDATED,2025-04-10 21:00:00,2
