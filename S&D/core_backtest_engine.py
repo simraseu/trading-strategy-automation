@@ -225,18 +225,21 @@ class CoreBacktestEngine:
         
         print(f"   📊 Found {len(all_patterns)} total patterns")
         
-        # Apply UPDATED distance filter (2.5x from settings.py)
-        min_ratio = ZONE_CONFIG['min_legout_ratio']  # 2.5x from your settings
-        valid_patterns = [
+        # Apply 2.5x VALIDATION filter (zones that actually hit 2.5x targets)
+        validated_patterns = [
             pattern for pattern in all_patterns
-            if 'leg_out' in pattern and 'ratio_to_base' in pattern['leg_out']
-            and pattern['leg_out']['ratio_to_base'] >= min_ratio
+            if pattern.get('target_2_5x_hit', False) == True  # Only zones that hit 2.5x target
         ]
         
-        if not valid_patterns:
-            return self.create_empty_result(pair, timeframe, f"No patterns meet {min_ratio}x distance")
+        if not validated_patterns:
+            total_zones = len(all_patterns)
+            validated_count = len(validated_patterns)
+            return self.create_empty_result(pair, timeframe, f"No validated zones: {validated_count}/{total_zones} hit 2.5x target")
         
-        print(f"   📊 {len(valid_patterns)} patterns meet {min_ratio}x requirement (updated threshold)")
+        print(f"   🎯 {len(validated_patterns)} zones validated (hit 2.5x target) from {len(all_patterns)} total")
+        
+        # Use validated patterns instead of leg-out filtered patterns
+        valid_patterns = validated_patterns
         
         # Execute trades with REALISTIC LOGIC
         trades = self.execute_realistic_trades(valid_patterns, data, trend_data, timeframe)
@@ -526,8 +529,7 @@ class CoreBacktestEngine:
             'gross_loss': round(gross_loss, 2),
             'total_return': round(total_return, 2),
             'avg_trade_duration': round(np.mean([t.get('duration_days', 0) for t in trades]), 1),
-            'leg_out_threshold': ZONE_CONFIG['min_legout_ratio'],  # Record current threshold
-            'trades': trades
+            'validation_method': '2.5x_target_validation',  # Record validation method used            'trades': trades
         }
     
     def create_empty_result(self, pair: str, timeframe: str, reason: str) -> Dict:

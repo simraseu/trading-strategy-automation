@@ -21,7 +21,7 @@ except ImportError:
     ZONE_CONFIG = {
         'min_base_candles': 1,
         'max_base_candles': 6,
-        'min_legout_ratio': 1.5,
+        'min_legout_ratio': 0.5,
         'min_pattern_pips': 20,
         'pip_value': 0.0001
     }
@@ -151,10 +151,6 @@ class ZoneDetector:
                 if not leg_out:
                     continue
                 
-                # STEP 4: Validate minimum distance requirement
-                if leg_out['ratio_to_base'] < self.config['min_legout_ratio']:
-                    continue
-                
                 # STEP 5: Create D-B-D pattern and mark base sequence as used
                 pattern = self.create_pattern(
                     pattern_type='D-B-D',
@@ -204,10 +200,6 @@ class ZoneDetector:
                 if not leg_out:
                     continue
                 
-                # STEP 4: Validate minimum distance requirement
-                if leg_out['ratio_to_base'] < self.config['min_legout_ratio']:
-                    continue
-                
                 # STEP 5: Create R-B-R pattern and mark base sequence as used
                 pattern = self.create_pattern(
                     pattern_type='R-B-R',
@@ -255,10 +247,6 @@ class ZoneDetector:
                 if base_sequence_id in self.used_base_sequences:
                     continue  # Skip - this base sequence already created a zone
                 
-                # STEP 4: Validate minimum distance requirement
-                if leg_out['ratio_to_base'] < self.config['min_legout_ratio']:
-                    continue
-                
                 # STEP 5: Create D-B-R pattern and mark base sequence as used
                 pattern = self.create_pattern(
                     pattern_type='D-B-R',
@@ -305,10 +293,6 @@ class ZoneDetector:
                 base_sequence_id = base_sequence['base_sequence_id']
                 if base_sequence_id in self.used_base_sequences:
                     continue  # Skip - this base sequence already created a zone
-                
-                # STEP 4: Validate minimum distance requirement
-                if leg_out['ratio_to_base'] < self.config['min_legout_ratio']:
-                    continue
                 
                 # STEP 5: Create R-B-D pattern and mark base sequence as used
                 pattern = self.create_pattern(

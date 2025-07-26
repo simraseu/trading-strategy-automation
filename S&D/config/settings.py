@@ -67,7 +67,7 @@ ZONE_CONFIG = {
     'min_base_candles': 1,
     'max_base_candles': 6,
     'optimal_base_candles': 3,
-    'min_legout_ratio': 2.5,      # 2.5x minimum ratio requirement
+    'min_legout_ratio': 0.5,      # Basic formation quality
     'min_leg_strength': 1,
     'max_base_retracement': 0.3,
     'min_pattern_pips': 10,
@@ -111,7 +111,7 @@ RISK_CONFIG = {
         'round_to_level': False        # Round to psychological levels
     },
     'take_profit_rules': {
-        'risk_reward_ratio': 2.5,      # Minimum 1:2 RR
+        'risk_reward_ratio': 2.5,      # Minimum 1:25 RR
         'scale_out_enabled': False,     # Take partial profits
         'scale_levels': [1.0, 2.0, 3.0], # 1R, 2R, 3R exits
         'scale_percentages': [33, 33, 34] # % of position to close
