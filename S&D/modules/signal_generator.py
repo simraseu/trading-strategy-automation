@@ -188,10 +188,30 @@ class SignalGenerator:
             signal_direction = 'BUY' if zone['type'] == 'R-B-R' else 'SELL'  # Fallback
         
         # GET ZONE FORMATION DATES from the stored data
-        zone_start_date = self.data.index[zone['start_idx']]
-        zone_end_date = self.data.index[zone['end_idx']]
-        base_start_date = self.data.index[zone['base']['start_idx']]
-        base_end_date = self.data.index[zone['base']['end_idx']]
+        # FIXED: Handle both datetime index and integer index
+        try:
+            zone_start_date = self.data.index[zone['start_idx']]
+            zone_end_date = self.data.index[zone['end_idx']]
+            base_start_date = self.data.index[zone['base']['start_idx']]
+            base_end_date = self.data.index[zone['base']['end_idx']]
+            
+            # Ensure we have datetime objects
+            if isinstance(zone_start_date, int):
+                zone_start_date = f"Index_{zone_start_date}"
+                zone_end_date = f"Index_{zone_end_date}"
+                base_start_date = f"Index_{base_start_date}"
+                base_end_date = f"Index_{base_end_date}"
+                zone_formation_period = f"Index {zone['start_idx']} to {zone['end_idx']}"
+            else:
+                zone_formation_period = f"{zone_start_date.strftime('%Y-%m-%d')} to {zone_end_date.strftime('%Y-%m-%d')}"
+                
+        except (KeyError, AttributeError, IndexError) as e:
+            # Fallback for problematic indices
+            zone_start_date = f"Index_{zone.get('start_idx', 'unknown')}"
+            zone_end_date = f"Index_{zone.get('end_idx', 'unknown')}"
+            base_start_date = f"Index_{zone['base'].get('start_idx', 'unknown')}"
+            base_end_date = f"Index_{zone['base'].get('end_idx', 'unknown')}"
+            zone_formation_period = f"Formation indices: {zone.get('start_idx', 'unknown')}-{zone.get('end_idx', 'unknown')}"
         
         signal = {
             # Signal Identification WITH DATES
@@ -205,7 +225,7 @@ class SignalGenerator:
             'zone_end_date': zone_end_date,
             'base_start_date': base_start_date,
             'base_end_date': base_end_date,
-            'zone_formation_period': f"{zone_start_date.strftime('%Y-%m-%d')} to {zone_end_date.strftime('%Y-%m-%d')}",
+            'zone_formation_period': zone_formation_period,
             
             # Trade Direction & Type
             'direction': signal_direction,
@@ -233,7 +253,6 @@ class SignalGenerator:
             'trend': trend_data['trend_filtered'].iloc[-1],
             'trend_strength': trend_data['ema_separation'].iloc[-1],
             'ema_50': trend_data['ema_50'].iloc[-1],
-            'ema_100': trend_data['ema_100'].iloc[-1],
             'ema_200': trend_data['ema_200'].iloc[-1],
             
             # Signal Quality - Basic information only
