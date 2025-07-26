@@ -19,7 +19,7 @@ class DataLoader:
         """
         Enhanced load method with smart OANDA format detection
         """
-        print(f"📊 Loading {pair} {timeframe} data...")
+        
         
 # First try direct OANDA format matching
         files = self.list_available_files()
@@ -35,7 +35,6 @@ class DataLoader:
         
         if target_file:
             filepath = os.path.join(self.raw_path, target_file)
-            print(f"📁 Found direct match: {target_file}")
         else:
             # Fallback to pattern matching for backward compatibility
             timeframe_mapping = {
@@ -83,7 +82,6 @@ class DataLoader:
                 )
             
             filepath = matching_files[0]
-            print(f"📁 Found via pattern matching: {os.path.basename(filepath)}")
         
         # Load and process the file
         try:
@@ -95,7 +93,6 @@ class DataLoader:
             data = self._clean_data(data)
             
             if self.validate_data_quality(data):
-                print(f"✅ Loaded {len(data)} candles for {pair} {timeframe}")
                 return data
             else:
                 raise ValueError("Data quality validation failed")
@@ -145,7 +142,6 @@ class DataLoader:
         """
         Alternative parsing method for problematic files
         """
-        print("🔄 Trying alternative parsing method...")
         
         # Read as plain text first
         with open(filepath, 'r') as f:
@@ -188,7 +184,6 @@ class DataLoader:
         - UNIX timestamps: 1642233600
         - Date only: '2024-01-15'
         """
-        print("🕐 Parsing datetime with robust format detection...")
         
         def parse_single_date(date_val):
             if pd.isna(date_val):
@@ -242,40 +237,31 @@ class DataLoader:
         total_dates = len(date_series)
         success_rate = (successful_parses / total_dates) * 100
         
-        print(f"   ✅ Parsed {successful_parses}/{total_dates} dates ({success_rate:.1f}% success)")
-        
         if success_rate < 95:
-            print(f"   ⚠️  Low success rate - check date formats in source data")
         
-        return parsed_dates
+            return parsed_dates
 
     def validate_data_quality(self, data: pd.DataFrame) -> bool:
         """
         Validate data quality and completeness (RELAXED for real-world data)
-        """
-        print("🔍 Validating data quality...")
-        
+        """        
         required_cols = ['open', 'high', 'low', 'close']
         
         # Check required columns exist
         missing_cols = [col for col in required_cols if col not in data.columns]
         if missing_cols:
-            print(f"❌ Missing required columns: {missing_cols}")
             return False
         
         # Check for missing values
         if data[required_cols].isnull().any().any():
-            print("❌ Data contains missing values")
             return False
         
         # Check for negative prices
         if (data[required_cols] <= 0).any().any():
-            print("❌ Data contains negative/zero prices")
             return False
         
         # Check high >= low (CRITICAL validation)
         if (data['high'] < data['low']).any():
-            print("❌ Data contains invalid high/low relationships")
             return False
         
         # RELAXED VALIDATION: Check for extreme outliers instead of strict range validation
@@ -295,25 +281,23 @@ class DataLoader:
                 print(f"❌ Too many open price violations: {violation_count}/{total_count} ({violation_pct:.1f}%)")
                 return False
             else:
-                print(f"⚠️  Minor open price violations: {violation_count}/{total_count} ({violation_pct:.1f}%) - acceptable")
         
-        # Check for extreme close price violations (more than 1% outside range)  
-        close_violations = ((data['close'] > data['high'] + 0.01 * high_low_range) | 
-                           (data['close'] < data['low'] - 0.01 * high_low_range))
-        
-        if close_violations.any():
-            violation_count = close_violations.sum()
-            total_count = len(data)
-            violation_pct = (violation_count / total_count) * 100
-            
-            if violation_pct > 5:  # Only fail if >5% of data has violations
-                print(f"❌ Too many close price violations: {violation_count}/{total_count} ({violation_pct:.1f}%)")
-                return False
-            else:
-                print(f"⚠️  Minor close price violations: {violation_count}/{total_count} ({violation_pct:.1f}%) - acceptable")
-        
-        print("✅ Data quality validation passed (relaxed validation)")
-        return True
+                # Check for extreme close price violations (more than 1% outside range)  
+                close_violations = ((data['close'] > data['high'] + 0.01 * high_low_range) | 
+                                (data['close'] < data['low'] - 0.01 * high_low_range))
+                
+                if close_violations.any():
+                    violation_count = close_violations.sum()
+                    total_count = len(data)
+                    violation_pct = (violation_count / total_count) * 100
+                    
+                    if violation_pct > 5:  # Only fail if >5% of data has violations
+                        print(f"❌ Too many close price violations: {violation_count}/{total_count} ({violation_pct:.1f}%)")
+                        return False
+                    else:
+                        print(f"⚠️  Minor close price violations: {violation_count}/{total_count} ({violation_pct:.1f}%) - acceptable")
+                
+                return True
     
     def list_available_files(self) -> List[str]:
         """
@@ -376,10 +360,8 @@ class DataLoader:
         Returns:
             List of unique currency pairs found
         """
-        print(f"🔍 Searching for pairs in: {self.raw_path}")
         
         files = self.list_available_files()
-        print(f"📁 Found {len(files)} CSV files")
         
         pairs = set()
         
@@ -390,7 +372,6 @@ class DataLoader:
                 pairs.add(pair)
         
         pairs_list = sorted(list(pairs))
-        print(f"📊 Found {len(pairs_list)} currency pairs: {', '.join(pairs_list)}")
         
         return pairs_list
     
@@ -401,7 +382,6 @@ class DataLoader:
         Returns:
             List of unique timeframes found
         """
-        print(f"🔍 Searching for timeframes in: {self.raw_path}")
         
         files = self.list_available_files()
         timeframes = set()
@@ -413,7 +393,6 @@ class DataLoader:
                 timeframes.add(timeframe)
         
         timeframes_list = sorted(list(timeframes))
-        print(f"⏰ Found {len(timeframes_list)} timeframes: {', '.join(timeframes_list)}")
         
         return timeframes_list
     
@@ -424,7 +403,6 @@ class DataLoader:
         Returns:
             Dictionary mapping pairs to their available timeframes
         """
-        print(f"📋 Building complete data inventory...")
         
         files = self.list_available_files()
         data_inventory = {}
@@ -445,7 +423,6 @@ class DataLoader:
             data_inventory[pair].sort()
         
         total_files = sum(len(timeframes) for timeframes in data_inventory.values())
-        print(f"✅ Inventory complete: {len(data_inventory)} pairs, {total_files} datasets")
         
         return data_inventory
     
@@ -459,7 +436,6 @@ class DataLoader:
         Returns:
             Dictionary mapping pair names to DataFrames
         """
-        print(f"📊 Loading all pairs for timeframe: {timeframe}")
         
         inventory = self.get_available_data()
         results = {}
@@ -478,7 +454,6 @@ class DataLoader:
                 except Exception as e:
                     print(f"   ❌ {pair}: {str(e)}")
         
-        print(f"📈 Loaded {successful_loads}/{len([p for p, tf in inventory.items() if timeframe in tf])} pairs successfully")
         return results
     
     def load_all_timeframes(self, pair: str) -> Dict[str, pd.DataFrame]:
@@ -491,7 +466,6 @@ class DataLoader:
         Returns:
             Dictionary mapping timeframes to DataFrames
         """
-        print(f"📊 Loading all timeframes for pair: {pair}")
         
         inventory = self.get_available_data()
         results = {}
@@ -515,7 +489,6 @@ class DataLoader:
             except Exception as e:
                 print(f"   ❌ {timeframe}: {str(e)}")
         
-        print(f"📈 Loaded {successful_loads}/{len(available_timeframes)} timeframes successfully")
         return results
     
     def load_complete_dataset(self) -> Dict[str, Dict[str, pd.DataFrame]]:
@@ -525,7 +498,6 @@ class DataLoader:
         Returns:
             Nested dictionary: {pair: {timeframe: DataFrame}}
         """
-        print(f"🚀 Loading complete dataset...")
         
         inventory = self.get_available_data()
         results = {}
@@ -548,8 +520,5 @@ class DataLoader:
                         print(f"   ❌ {timeframe}: No data loaded")
                 except Exception as e:
                     print(f"   ❌ {timeframe}: {str(e)}")
-        
-        print(f"\n🎉 Complete dataset loaded: {successful_loads}/{total_datasets} datasets successful")
-        print(f"📈 Final structure: {len(results)} pairs with data")
         
         return results

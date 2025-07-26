@@ -73,10 +73,7 @@ class CoreBacktestEngine:
     """
     
     def __init__(self):
-        """Initialize with system optimization and updated foundation"""
-        print("🚀 CORE BACKTESTING ENGINE - INITIALIZING")
-        print("=" * 60)
-        
+        """Initialize with system optimization and updated foundation"""        
         # Initialize your updated data loader
         self.data_loader = DataLoader()
         
@@ -95,16 +92,9 @@ class CoreBacktestEngine:
         
         # Current test configuration (will be set per test)
         self.current_config = None
-        
-        print(f"✅ INITIALIZATION COMPLETE:")
-        print(f"   🔧 Updated modules: CandleClassifier, ZoneDetector, TrendClassifier")
-        print(f"   🔄 Parallel workers: {self.max_workers} (optimized)")
-        print(f"   💾 Memory threshold: {self.memory_threshold*100:.0f}%")
-        print(f"   📊 Analysis periods: {len(ANALYSIS_PERIODS)} configured")
     
     def discover_all_pairs(self) -> List[str]:
         """Auto-discover all available currency pairs using updated DataLoader"""
-        print(f"🔍 AUTO-DISCOVERING CURRENCY PAIRS...")
         
         try:
             # Use your updated DataLoader's discovery method
@@ -114,7 +104,6 @@ class CoreBacktestEngine:
                 print("❌ No currency pairs found")
                 return []
             
-            print(f"✅ DISCOVERED {len(pairs)} PAIRS: {', '.join(pairs)}")
             return pairs
             
         except Exception as e:
@@ -126,7 +115,6 @@ class CoreBacktestEngine:
         Discover only valid pair/timeframe combinations that actually have data files
         Returns list of (pair, timeframe) tuples
         """
-        print(f"🔍 DISCOVERING VALID DATA COMBINATIONS...")
         
         try:
             # Use DataLoader's comprehensive inventory method
@@ -140,7 +128,6 @@ class CoreBacktestEngine:
                     valid_combinations.append((pair, timeframe))
                     total_files += 1
             
-            print(f"✅ FOUND {total_files} VALID DATA FILES:")
             print(f"   {len(data_inventory)} pairs with data")
             print(f"   {len(valid_combinations)} valid combinations")
             
@@ -156,14 +143,11 @@ class CoreBacktestEngine:
     
     def load_data_with_validation(self, pair: str, timeframe: str, days_back: int = 730) -> Optional[pd.DataFrame]:
         """Load data using updated DataLoader with validation"""
-        try:
-            print(f"📊 Loading {pair} {timeframe}...")
-            
+        try:            
             # Use your updated data loader
             data = self.data_loader.load_pair_data(pair, timeframe)
             
             if data is None or len(data) < 100:
-                print(f"❌ Insufficient data for {pair} {timeframe}")
                 return None
             
             # Limit data if needed (keep some history for indicators)
@@ -171,7 +155,6 @@ class CoreBacktestEngine:
                 max_candles = min(days_back + 365, len(data))
                 data = data.iloc[-max_candles:]
             
-            print(f"✅ Loaded {len(data)} candles for {pair} {timeframe}")
             return data
             
         except Exception as e:
