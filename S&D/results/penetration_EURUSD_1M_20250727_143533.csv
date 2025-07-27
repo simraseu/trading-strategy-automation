@@ -1,0 +1,8 @@
+pair,timeframe,total_trades,winning_trades,losing_trades,breakeven_trades,win_rate,loss_rate,be_rate,profit_factor,total_pnl,gross_profit,gross_loss,total_return,avg_trade_duration,description,trades,strategy,strategy_description,wick_threshold,zones_tested,zones_passed,zone_filter_rate
+EURUSD,1M,0,0,0,0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,Insufficient data,[],Fresh_0pct,Fresh zones - 0% wick penetration allowed,0.0,0,0,0.0
+EURUSD,1M,0,0,0,0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,Insufficient data,[],Light_20pct,Light testing - 20% wick penetration allowed,0.2,0,0,0.0
+EURUSD,1M,0,0,0,0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,Insufficient data,[],Moderate_40pct,Moderate testing - 40% wick penetration allowed,0.4,0,0,0.0
+EURUSD,1M,0,0,0,0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,Insufficient data,[],Current_50pct,Current baseline - 50% wick penetration allowed,0.5,0,0,0.0
+EURUSD,1M,0,0,0,0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,Insufficient data,[],Heavy_60pct,Heavy testing - 60% wick penetration allowed,0.6,0,0,0.0
+EURUSD,1M,0,0,0,0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,Insufficient data,[],Ultra_Heavy_80pct,Ultra heavy testing - 80% wick penetration allowed,0.8,0,0,0.0
+EURUSD,1M,0,0,0,0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,0.0,Insufficient data,[],No_Filter,No penetration filtering - all zones valid,,0,0,0.0

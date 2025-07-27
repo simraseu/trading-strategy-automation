@@ -142,7 +142,7 @@ class CoreBacktestEngine:
             return []
     
     def load_data_with_validation(self, pair: str, timeframe: str, days_back: int = 730) -> Optional[pd.DataFrame]:
-        """Load data using updated DataLoader with proper date filtering"""
+        """Load data using updated DataLoader with INTELLIGENT timeframe-aware filtering"""
         try:            
             # Use your updated data loader to get full dataset
             data = self.data_loader.load_pair_data(pair, timeframe)
@@ -150,30 +150,51 @@ class CoreBacktestEngine:
             if data is None or len(data) < 100:
                 return None
             
-            # FIXED: Proper date-based filtering using datetime index
-            if days_back < 9999:
+            # TIMEFRAME-AWARE FILTERING: Adjust requirements based on timeframe
+            timeframe_multipliers = {
+                '1D': 1, '2D': 2, '3D': 3, '4D': 4, '5D': 5,
+                '1W': 7, '2W': 14, '3W': 21, '1M': 30,
+                'H12': 0.5, 'H8': 0.33, 'H4': 0.17
+            }
+            
+            # Get timeframe multiplier (default to 1 if unknown)
+            tf_multiplier = timeframe_multipliers.get(timeframe, 1)
+            
+            # Calculate minimum candles needed based on timeframe
+            min_candles_for_ema200 = max(200, int(200 / tf_multiplier))  # Scale EMA200 requirement
+            min_trading_candles = max(50, int(100 / tf_multiplier))      # Scale trading data requirement
+            absolute_minimum = min_candles_for_ema200 + min_trading_candles
+            
+            print(f"   📊 Timeframe {timeframe}: multiplier={tf_multiplier}, min_candles={absolute_minimum}")
+            
+            # INTELLIGENT FILTERING: Only filter if we have sufficient data
+            if days_back < 9999 and len(data) > absolute_minimum * 2:  # Only filter if we have 2x minimum
                 # Ensure we have a proper datetime index
                 if not isinstance(data.index, pd.DatetimeIndex):
                     print(f"⚠️  Data does not have DatetimeIndex: {type(data.index)}")
                     return None
                 
-                # Calculate cutoff date from the most recent data point
-                most_recent_date = data.index[-1]  # This is now guaranteed to be a Timestamp
-                cutoff_date = most_recent_date - pd.Timedelta(days=days_back)
+                # Calculate required candles for the requested period
+                requested_candles = int(days_back / tf_multiplier)
+                buffer_candles = min_candles_for_ema200  # EMA200 buffer
+                total_candles_needed = requested_candles + buffer_candles
                 
-                # Add buffer for EMA200 calculation (365 days minimum)
-                buffer_date = cutoff_date - pd.Timedelta(days=365)
-                
-                # Filter data from buffer_date onwards to ensure sufficient history
-                data = data[data.index >= buffer_date]
-                
-                # Verify we have enough data after filtering
-                if len(data) < 200:  # Minimum for EMA200 + some trading data
-                    print(f"⚠️  Insufficient data after filtering: {len(data)} candles")
-                    return None
+                # Only filter if we have more data than needed
+                if len(data) > total_candles_needed:
+                    # Take the last N candles instead of date-based filtering
+                    data = data.tail(total_candles_needed)
+                    print(f"   📊 Filtered to {len(data)} candles (candle-based filtering)")
+                else:
+                    print(f"   📊 Using all {len(data)} candles (insufficient for filtering)")
                 
                 print(f"   📅 Date range: {data.index[0].strftime('%Y-%m-%d')} to {data.index[-1].strftime('%Y-%m-%d')}")
-                print(f"   📊 Filtered to {len(data)} candles ({days_back + 365} day period)")
+            else:
+                print(f"   📊 Using all {len(data)} candles (no filtering applied)")
+            
+            # Final validation
+            if len(data) < absolute_minimum:
+                print(f"⚠️  Insufficient data: {len(data)} < {absolute_minimum} required for {timeframe}")
+                return None
             
             return data
             
