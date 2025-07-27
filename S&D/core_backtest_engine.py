@@ -80,11 +80,11 @@ class CoreBacktestEngine:
         # CPU optimization
         available_cores = cpu_count()
         if available_cores >= 12:  # Hyperthreaded 6-core
-            self.max_workers = 8  
-        elif available_cores >= 6:
+            self.max_workers = 6
+        elif available_cores >= 4:
             self.max_workers = available_cores - 1
         else:
-            self.max_workers = max(1, available_cores - 1)
+            self.max_workers = max(1, available_cores - 2)
         
         # Memory optimization settings
         self.chunk_size = 100  # Process in chunks
@@ -367,29 +367,41 @@ class CoreBacktestEngine:
         )
     
     def simulate_realistic_outcome(self, entry_price: float, stop_loss: float, target_price: float,
-                                 direction: str, position_size: float, data: pd.DataFrame,
-                                 entry_idx: int, zone_type: str) -> Dict:
+                             direction: str, position_size: float, data: pd.DataFrame,
+                             entry_idx: int, zone_type: str) -> Dict:
         """
         Simulate REALISTIC trade outcome with proper 1R→breakeven management
-        FIXED: Proper position sizing and realistic P&L calculation
+        FIXED: Add realistic transaction costs and proper P&L calculation
         """
+        # Add realistic transaction costs
+        spread_pips = 2.0  # 2 pip spread (realistic for major pairs)
+        commission_per_lot = 7.0  # $7 per lot commission (realistic retail)
+        pip_value_per_lot = 10.0  # $10 per pip per standard lot
+        
+        # Apply spread cost to entry
+        if direction == 'BUY':
+            entry_price += (spread_pips * 0.0001)  # Pay the spread
+        else:
+            entry_price -= (spread_pips * 0.0001)  # Pay the spread
+        
         risk_distance = abs(entry_price - stop_loss)
         current_stop = stop_loss
         breakeven_moved = False
         
         # FIXED: Proper position sizing (5% risk = $500 max loss)
         max_risk_amount = 500  # $500 max risk per trade (5% of $10,000)
-        pip_value = 0.0001
-        stop_distance_pips = risk_distance / pip_value
+        stop_distance_pips = risk_distance / 0.0001
         
         # Recalculate position size for realistic $500 risk
         if stop_distance_pips > 0:
-            proper_position_size = max_risk_amount / (stop_distance_pips * 10)  # $10 per pip per lot
+            proper_position_size = max_risk_amount / (stop_distance_pips * pip_value_per_lot)
+            # Cap position size to reasonable maximum
+            proper_position_size = min(proper_position_size, 1.0)  # Max 1 standard lot
         else:
             return None
         
         # Look ahead for exit with proper trade management
-        for exit_idx in range(entry_idx + 1, min(entry_idx + 200, len(data))):
+        for exit_idx in range(entry_idx + 1, min(entry_idx + 50, len(data))):  # Limit to 50 candles
             exit_candle = data.iloc[exit_idx]
             
             # Calculate current R:R for break-even move
@@ -406,27 +418,32 @@ class CoreBacktestEngine:
             # Check stops and targets with REALISTIC P&L
             if direction == 'BUY':
                 if exit_candle['low'] <= current_stop:
-                    # Calculate realistic P&L
+                    # Calculate realistic P&L including costs
                     price_diff = current_stop - entry_price
-                    pips_moved = price_diff / pip_value
-                    pnl = pips_moved * proper_position_size * 10  # $10 per pip per lot
+                    pips_moved = price_diff / 0.0001
+                    gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
+                    total_commission = commission_per_lot * proper_position_size * 2  # Round trip
+                    net_pnl = gross_pnl - total_commission
                     
                     return {
                         'zone_type': zone_type,
                         'direction': direction,
                         'entry_price': entry_price,
                         'exit_price': current_stop,
-                        'result': 'LOSS' if pnl < -10 else ('BREAKEVEN' if abs(pnl) <= 10 else 'WIN'),
-                        'pnl': round(pnl, 2),
+                        'result': 'LOSS' if net_pnl < -10 else ('BREAKEVEN' if abs(net_pnl) <= 10 else 'WIN'),
+                        'pnl': round(net_pnl, 2),
                         'duration_days': exit_idx - entry_idx,
                         'position_size': proper_position_size,
-                        'pips': round(pips_moved, 1)
+                        'pips': round(pips_moved, 1),
+                        'commission_cost': total_commission
                     }
                 elif exit_candle['high'] >= target_price:
-                    # Calculate realistic P&L for win
+                    # Calculate realistic P&L for win including costs
                     price_diff = target_price - entry_price
-                    pips_moved = price_diff / pip_value
-                    pnl = pips_moved * proper_position_size * 10
+                    pips_moved = price_diff / 0.0001
+                    gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
+                    total_commission = commission_per_lot * proper_position_size * 2  # Round trip
+                    net_pnl = gross_pnl - total_commission
                     
                     return {
                         'zone_type': zone_type,
@@ -434,34 +451,38 @@ class CoreBacktestEngine:
                         'entry_price': entry_price,
                         'exit_price': target_price,
                         'result': 'WIN',
-                        'pnl': round(pnl, 2),
+                        'pnl': round(net_pnl, 2),
                         'duration_days': exit_idx - entry_idx,
                         'position_size': proper_position_size,
-                        'pips': round(pips_moved, 1)
+                        'pips': round(pips_moved, 1),
+                        'commission_cost': total_commission
                     }
-            else:  # SELL
+            else:  # SELL - Similar logic with costs
                 if exit_candle['high'] >= current_stop:
-                    # Calculate realistic P&L
                     price_diff = entry_price - current_stop
-                    pips_moved = price_diff / pip_value
-                    pnl = pips_moved * proper_position_size * 10
+                    pips_moved = price_diff / 0.0001
+                    gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
+                    total_commission = commission_per_lot * proper_position_size * 2
+                    net_pnl = gross_pnl - total_commission
                     
                     return {
                         'zone_type': zone_type,
                         'direction': direction,
                         'entry_price': entry_price,
                         'exit_price': current_stop,
-                        'result': 'LOSS' if pnl < -10 else ('BREAKEVEN' if abs(pnl) <= 10 else 'WIN'),
-                        'pnl': round(pnl, 2),
+                        'result': 'LOSS' if net_pnl < -10 else ('BREAKEVEN' if abs(net_pnl) <= 10 else 'WIN'),
+                        'pnl': round(net_pnl, 2),
                         'duration_days': exit_idx - entry_idx,
                         'position_size': proper_position_size,
-                        'pips': round(pips_moved, 1)
+                        'pips': round(pips_moved, 1),
+                        'commission_cost': total_commission
                     }
                 elif exit_candle['low'] <= target_price:
-                    # Calculate realistic P&L for win
                     price_diff = entry_price - target_price
-                    pips_moved = price_diff / pip_value
-                    pnl = pips_moved * proper_position_size * 10
+                    pips_moved = price_diff / 0.0001
+                    gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
+                    total_commission = commission_per_lot * proper_position_size * 2
+                    net_pnl = gross_pnl - total_commission
                     
                     return {
                         'zone_type': zone_type,
@@ -469,14 +490,15 @@ class CoreBacktestEngine:
                         'entry_price': entry_price,
                         'exit_price': target_price,
                         'result': 'WIN',
-                        'pnl': round(pnl, 2),
+                        'pnl': round(net_pnl, 2),
                         'duration_days': exit_idx - entry_idx,
                         'position_size': proper_position_size,
-                        'pips': round(pips_moved, 1)
+                        'pips': round(pips_moved, 1),
+                        'commission_cost': total_commission
                     }
-        
-        # Trade still open at end (neutral exit)
-        return None
+            
+            # Trade still open at end (neutral exit with costs)
+            return None
     
     def calculate_performance_metrics(self, trades: List[Dict], pair: str, timeframe: str) -> Dict:
         """Calculate comprehensive performance metrics with CORRECTED duration conversion"""
