@@ -273,47 +273,74 @@ class CoreBacktestEngine:
         return self.calculate_performance_metrics(trades, pair, timeframe)
     
     def execute_realistic_trades(self, patterns: List[Dict], data: pd.DataFrame,
-                               trend_data: pd.DataFrame, timeframe: str, pair: str) -> List[Dict]:
+                           trend_data: pd.DataFrame, timeframe: str, pair: str) -> List[Dict]:
         """
-        Execute trades using REALISTIC LOGIC extracted from distance_edge.py
-        but with UPDATED SETTINGS and MODULES
+        Execute trades using REALISTIC LOGIC with proper zone formation filtering
+        CRITICAL FIX: Only trade zones formed WITHIN the backtest period
         """
         trades = []
         used_zones = set()
         
-        # Build zone activation schedule (realistic approach)
-        zone_activation_schedule = []
+        # CRITICAL FIX: Get backtest start date (first 200 candles are for EMA warm-up)
+        backtest_start_idx = 200
+        backtest_start_date = data.index[backtest_start_idx]
+        
+        print(f"   📅 Backtest period: {backtest_start_date.strftime('%Y-%m-%d')} to {data.index[-1].strftime('%Y-%m-%d')}")
+        
+        # CRITICAL FIX: Filter patterns to only include zones formed DURING backtest period
+        valid_patterns = []
         for pattern in patterns:
             zone_end_idx = pattern.get('end_idx', pattern.get('base', {}).get('end_idx'))
-            if zone_end_idx is not None and zone_end_idx < len(data):
-                zone_activation_schedule.append({
-                    'date': data.index[zone_end_idx],
-                    'pattern': pattern,
-                    'zone_id': f"{pattern['type']}_{zone_end_idx}_{pattern['zone_low']:.5f}",
-                    'zone_end_idx': zone_end_idx
-                })
+            if zone_end_idx is not None and zone_end_idx >= backtest_start_idx:
+                # Zone was formed during backtest period - valid for trading
+                zone_formation_date = data.index[zone_end_idx]
+                pattern['formation_date'] = zone_formation_date
+                valid_patterns.append(pattern)
+                print(f"   ✅ Valid zone: {pattern['type']} formed on {zone_formation_date.strftime('%Y-%m-%d')}")
+            else:
+                # Zone formed before backtest period - exclude from trading
+                zone_formation_date = data.index[zone_end_idx] if zone_end_idx < len(data) else "Unknown"
+                print(f"   ❌ Excluded: {pattern['type']} formed before backtest start ({zone_formation_date})")
+        
+        if not valid_patterns:
+            print(f"   ⚠️  No zones formed during backtest period - no trades possible")
+            return trades
+        
+        print(f"   🎯 Trading {len(valid_patterns)} zones formed during backtest (excluded {len(patterns) - len(valid_patterns)} historical zones)")
+        
+        # Build zone activation schedule with ONLY valid patterns
+        zone_activation_schedule = []
+        for pattern in valid_patterns:
+            zone_end_idx = pattern['end_idx']
+            zone_activation_schedule.append({
+                'date': pattern['formation_date'],
+                'pattern': pattern,
+                'zone_id': f"{pattern['type']}_{zone_end_idx}_{pattern['zone_low']:.5f}",
+                'zone_end_idx': zone_end_idx
+            })
         
         zone_activation_schedule.sort(key=lambda x: x['date'])
         active_zones = []
         
-        # Process each candle for realistic trade execution
-        for current_idx in range(200, len(data)):
+        # Process each candle for realistic trade execution (START FROM ZONE FORMATION PERIOD)
+        for current_idx in range(backtest_start_idx, len(data)):
             current_date = data.index[current_idx]
+            current_price = data.iloc[current_idx]['close']
             
-            # Check for new zone activations
+            # Check for new zone activations (zones become tradeable 1 day after formation)
             for zone_info in zone_activation_schedule:
                 zone_id = zone_info['zone_id']
                 pattern = zone_info['pattern']
                 zone_end_idx = zone_info['zone_end_idx']
                 
-                # Zone becomes active 1 day after formation
-                if (current_date > zone_info['date'] and 
+                # REALISTIC: Zone becomes active next day after formation
+                if (current_idx > zone_end_idx and 
                     zone_id not in used_zones and 
-                    pattern not in active_zones and
-                    zone_end_idx < current_idx):
+                    pattern not in active_zones):
                     active_zones.append(pattern)
+                    print(f"   🟢 Zone activated: {pattern['type']} (formed {pattern['formation_date'].strftime('%Y-%m-%d')})")
             
-            # Check for trade executions
+            # Check for trade executions with PRICE PROXIMITY validation
             for zone in active_zones.copy():
                 zone_id = f"{zone['type']}_{zone.get('end_idx', 0)}_{zone['zone_low']:.5f}"
                 
@@ -321,7 +348,23 @@ class CoreBacktestEngine:
                     active_zones.remove(zone)
                     continue
                 
-                # Check trend alignment using UPDATED trend logic
+                # CRITICAL FIX: Price proximity check - only trade if price is near zone
+                zone_high = zone['zone_high']
+                zone_low = zone['zone_low']
+                zone_midpoint = (zone_high + zone_low) / 2
+                
+                # Calculate maximum reasonable distance (e.g., 500 pips for major pairs)
+                max_distance_pips = 500
+                pip_value = self.get_pip_value_for_pair(pair)
+                max_distance = max_distance_pips * pip_value
+                
+                distance_to_zone = min(abs(current_price - zone_high), abs(current_price - zone_low))
+                
+                if distance_to_zone > max_distance:
+                    print(f"   ⚠️  Zone {zone['type']} too far: {distance_to_zone/pip_value:.0f} pips (max: {max_distance_pips})")
+                    continue  # Skip zones too far from current price
+                
+                # Check trend alignment
                 current_trend = trend_data['trend'].iloc[current_idx] if current_idx < len(trend_data) else 'bullish'
                 
                 is_aligned = False
@@ -333,8 +376,8 @@ class CoreBacktestEngine:
                 if not is_aligned:
                     continue
                 
-                # Execute trade with REALISTIC LOGIC - Pass pair info
-                zone['pair'] = pair  # Add pair info to zone for pip value detection
+                # Execute trade with REALISTIC LOGIC
+                zone['pair'] = pair
                 trade_result = self.execute_single_realistic_trade(zone, data, current_idx)
                 
                 if trade_result:
@@ -342,9 +385,10 @@ class CoreBacktestEngine:
                     active_zones.remove(zone)
                     trades.append(trade_result)
                     print(f"      💰 Trade #{len(trades)}: {trade_result['result']} "
-                         f"${trade_result['pnl']:.0f} ({trade_result['zone_type']})")
+                        f"${trade_result['pnl']:.0f} ({trade_result['zone_type']}) "
+                        f"Distance: {distance_to_zone/pip_value:.0f} pips")
         
-        print(f"   ✅ Executed {len(trades)} trades from {len(patterns)} zones")
+        print(f"   ✅ Executed {len(trades)} realistic trades from {len(valid_patterns)} valid zones")
         return trades
     
     def execute_single_realistic_trade(self, zone: Dict, data: pd.DataFrame, current_idx: int) -> Optional[Dict]:
@@ -409,12 +453,14 @@ class CoreBacktestEngine:
         # Simulate REALISTIC trade outcome with 1R→breakeven management
         return self.simulate_realistic_outcome(
             entry_price, initial_stop, target_price, direction, 
-            position_size, data, current_idx, zone['type'], stop_distance_pips, zone.get('pair', 'EURUSD')
+            position_size, data, current_idx, zone['type'], stop_distance_pips, zone.get('pair', 'EURUSD'),
+            zone_high, zone_low
         )
 
     def simulate_realistic_outcome(self, entry_price: float, stop_loss: float, target_price: float,
-                         direction: str, position_size: float, data: pd.DataFrame,
-                         entry_idx: int, zone_type: str, stop_distance_pips: float, pair: str) -> Dict:
+                     direction: str, position_size: float, data: pd.DataFrame,
+                     entry_idx: int, zone_type: str, stop_distance_pips: float, pair: str, 
+                     zone_high: float = None, zone_low: float = None) -> Dict:
         """
         Simulate REALISTIC trade outcome with proper 1R→breakeven management
         Clean production version - no debug output
@@ -505,7 +551,9 @@ class CoreBacktestEngine:
                         'pips': round(pips_moved, 1),
                         'commission_cost': total_commission,
                         'breakeven_moved': breakeven_moved,
-                        'trade_summary': trade_summary
+                        'trade_summary': trade_summary,
+                        'zone_high': zone_high,
+                        'zone_low': zone_low
                     }
                 # Check 2.5R target hit (wick-based)
                 elif exit_candle['high'] >= target_price:
@@ -532,7 +580,9 @@ class CoreBacktestEngine:
                         'pips': round(pips_moved, 1),
                         'commission_cost': total_commission,
                         'breakeven_moved': breakeven_moved,
-                        'trade_summary': trade_summary
+                        'trade_summary': trade_summary,
+                        'zone_high': zone_high,
+                        'zone_low': zone_low
                     }
             else:  # SELL - Wick-based exits with exact break-even
                 # Check stop loss hit (wick-based)
@@ -568,7 +618,9 @@ class CoreBacktestEngine:
                         'pips': round(pips_moved, 1),
                         'commission_cost': total_commission,
                         'breakeven_moved': breakeven_moved,
-                        'trade_summary': trade_summary
+                        'trade_summary': trade_summary,
+                        'zone_high': zone_high,
+                        'zone_low': zone_low
                     }
                 # Check 2.5R target hit (wick-based)
                 elif exit_candle['low'] <= target_price:
@@ -595,7 +647,9 @@ class CoreBacktestEngine:
                         'pips': round(pips_moved, 1),
                         'commission_cost': total_commission,
                         'breakeven_moved': breakeven_moved,
-                        'trade_summary': trade_summary
+                        'trade_summary': trade_summary,
+                        'zone_high': zone_high,
+                        'zone_low': zone_low
                     }
         
         # Trade still open at end (neutral exit with costs)
@@ -976,19 +1030,25 @@ class CoreBacktestEngine:
                 if result['trades']:
                     trades_data = []
                     for i, trade in enumerate(result['trades'], 1):
+                        # Extract zone boundaries from trade data
+                        zone_high = trade.get('zone_high', 'N/A')
+                        zone_low = trade.get('zone_low', 'N/A')
+                        duration = trade.get('duration_days', trade.get('duration', 'N/A'))
+                        
                         trades_data.append({
                             'Trade_Number': i,
-                            'Trade_Summary': trade.get('trade_summary', f"{trade['zone_type']} - {trade['result']}"),
                             'Zone_Type': trade['zone_type'],
                             'Direction': trade['direction'],
                             'Entry_Date': trade['entry_date'].strftime('%Y-%m-%d') if hasattr(trade['entry_date'], 'strftime') else str(trade['entry_date']),
                             'Exit_Date': trade['exit_date'].strftime('%Y-%m-%d') if hasattr(trade['exit_date'], 'strftime') else str(trade['exit_date']),
                             'Entry_Price': f"{trade['entry_price']:.6f}",
                             'Exit_Price': f"{trade['exit_price']:.6f}",
+                            'Zone_High': f"{zone_high:.6f}" if isinstance(zone_high, (int, float)) else zone_high,
+                            'Zone_Low': f"{zone_low:.6f}" if isinstance(zone_low, (int, float)) else zone_low,
+                            'Duration': duration,
                             'Result': trade['result'],
                             'Pips': f"{trade['pips']:+.1f}",
                             'PnL': f"${trade['pnl']:.2f}",
-                            'Duration_Days': trade['duration_days'],
                             'Position_Size': f"{trade['position_size']:.4f}",
                             'Commission_Cost': f"${trade['commission_cost']:.2f}",
                             'Breakeven_Moved': 'Yes' if trade['breakeven_moved'] else 'No'
