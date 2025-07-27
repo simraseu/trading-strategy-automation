@@ -69,51 +69,42 @@ class ZoneDetector:
             print(f"✅ Zone detection complete:")
             print(f"   D-B-D: {len(dbd_patterns)}, R-B-R: {len(rbr_patterns)}, D-B-R: {len(dbr_patterns)}, R-B-D: {len(rbd_patterns)}")
             
-            # NEW: Add 2.5x validation to all patterns
+            # MANDATORY: Filter zones to only return 2.5x validated ones
             if total_patterns > 0:
-                print(f"🎯 Validating zones with 2.5x target monitoring...")
+                print(f"🎯 Validating {total_patterns} zones for 2.5x achievement...")
                 
                 all_patterns = dbd_patterns + rbr_patterns + dbr_patterns + rbd_patterns
                 validated_patterns = []
+                trading_ready_patterns = []
                 
                 for pattern in all_patterns:
                     validated_pattern = self.validate_zone_2_5x_target(pattern, data)
                     validated_patterns.append(validated_pattern)
+                    
+                    # STRICT FILTER: Only zones that achieved 2.5x target
+                    if validated_pattern.get('target_2_5x_hit') == True:
+                        trading_ready_patterns.append(validated_pattern)
                 
-                # Split back into pattern types with validation data
-                validated_dbd = [p for p in validated_patterns if p['type'] == 'D-B-D']
-                validated_rbr = [p for p in validated_patterns if p['type'] == 'R-B-R']
-                validated_dbr = [p for p in validated_patterns if p['type'] == 'D-B-R']
-                validated_rbd = [p for p in validated_patterns if p['type'] == 'R-B-D']
+                # Split ONLY validated patterns into types
+                validated_dbd = [p for p in trading_ready_patterns if p['type'] == 'D-B-D']
+                validated_rbr = [p for p in trading_ready_patterns if p['type'] == 'R-B-R']
+                validated_dbr = [p for p in trading_ready_patterns if p['type'] == 'D-B-R']
+                validated_rbd = [p for p in trading_ready_patterns if p['type'] == 'R-B-D']
                 
                 # Report validation statistics
-                validated_count = len([p for p in validated_patterns if p['target_2_5x_hit']])
-                invalidated_count = len([p for p in validated_patterns if p['zone_validation_status'] == 'INVALIDATED'])
-                pending_count = len([p for p in validated_patterns if p['zone_validation_status'] == 'PENDING'])
+                validated_count = len(trading_ready_patterns)
+                total_hit_target = len([p for p in validated_patterns if p['target_2_5x_hit']])
                 
-                print(f"   ✅ Zones reaching 2.5x target: {validated_count}/{total_patterns}")
-                print(f"   ❌ Zones invalidated: {invalidated_count}/{total_patterns}")
-                print(f"   ⏳ Zones pending: {pending_count}/{total_patterns}")
-                
+                print(f"   ✅ Valid zones for trading: {validated_count}/{total_patterns}")
+
                 return {
                     'dbd_patterns': validated_dbd,
                     'rbr_patterns': validated_rbr,
                     'dbr_patterns': validated_dbr,
                     'rbd_patterns': validated_rbd,
-                    'total_patterns': total_patterns,
-                    'validated_zones': validated_count,
-                    'invalidated_zones': invalidated_count,
-                    'pending_zones': pending_count
-                }
-            else:
-                return {
-                    'dbd_patterns': dbd_patterns,
-                    'rbr_patterns': rbr_patterns,
-                    'dbr_patterns': dbr_patterns,
-                    'rbd_patterns': rbd_patterns,
-                    'total_patterns': total_patterns,
-                    'validated_zones': 0,
-                    'invalidated_zones': 0,
+                    'total_patterns': validated_count,  # Only return validated count
+                    'validated_zones': total_hit_target,
+                    'invalidated_zones': len(validated_patterns) - total_hit_target,
                     'pending_zones': 0
                 }
             
@@ -789,7 +780,9 @@ class ZoneDetector:
             else:
                 validation_status = 'PENDING'  # Never hit target, never invalidated
             
-            # Update zone with validation data
+            # Update zone with validation data including completion index
+            validation_completion_idx = leg_out_end_idx + monitoring_count if target_hit else len(data) - 1
+            
             zone.update({
                 'immediate_leg_out_ratio': zone['leg_out']['ratio_to_base'],
                 'maximum_distance_ratio': max_ratio,
@@ -798,7 +791,8 @@ class ZoneDetector:
                 'target_2_5x_date': target_hit_date,
                 'zone_validation_status': validation_status,
                 'invalidation_date': invalidation_date,
-                'monitoring_candles_count': monitoring_count
+                'monitoring_candles_count': monitoring_count,
+                'validation_completion_idx': validation_completion_idx  # When validation completed
             })
             
             return zone

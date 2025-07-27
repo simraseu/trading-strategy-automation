@@ -327,18 +327,19 @@ class CoreBacktestEngine:
             current_date = data.index[current_idx]
             current_price = data.iloc[current_idx]['close']
             
-            # Check for new zone activations (zones become tradeable 1 day after formation)
+            # Check for new zone activations (zones become tradeable AFTER 2.5x validation)
             for zone_info in zone_activation_schedule:
                 zone_id = zone_info['zone_id']
                 pattern = zone_info['pattern']
                 zone_end_idx = zone_info['zone_end_idx']
                 
-                # REALISTIC: Zone becomes active next day after formation
-                if (current_idx > zone_end_idx and 
+                # CRITICAL FIX: Zone becomes active AFTER 2.5x validation completes
+                validation_completion_idx = pattern.get('validation_completion_idx', zone_end_idx)
+                
+                if (current_idx > validation_completion_idx and 
                     zone_id not in used_zones and 
                     pattern not in active_zones):
                     active_zones.append(pattern)
-                    print(f"   🟢 Zone activated: {pattern['type']} (formed {pattern['formation_date'].strftime('%Y-%m-%d')})")
             
             # Check for trade executions with PRICE PROXIMITY validation
             for zone in active_zones.copy():
