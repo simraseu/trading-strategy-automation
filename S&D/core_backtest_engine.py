@@ -413,8 +413,8 @@ class CoreBacktestEngine:
         )
 
     def simulate_realistic_outcome(self, entry_price: float, stop_loss: float, target_price: float,
-                             direction: str, position_size: float, data: pd.DataFrame,
-                             entry_idx: int, zone_type: str, stop_distance_pips: float, pair: str) -> Dict:
+                         direction: str, position_size: float, data: pd.DataFrame,
+                         entry_idx: int, zone_type: str, stop_distance_pips: float, pair: str) -> Dict:
         """
         Simulate REALISTIC trade outcome with proper 1R→breakeven management
         Clean production version - no debug output
@@ -488,6 +488,9 @@ class CoreBacktestEngine:
                     else:
                         result_type = 'WIN'
                     
+                    # Create detailed trade summary
+                    trade_summary = f"{zone_type} zone - Zone High: {stop_loss + risk_distance:.6f}, Zone Low: {stop_loss:.6f}, Entry: {entry_price:.6f}, Stop: {stop_loss:.6f}, Duration: {exit_idx - entry_idx} candles, Result: {pips_moved:+.0f} pips = ${net_pnl:.0f}"
+                    
                     return {
                         'zone_type': zone_type,
                         'direction': direction,
@@ -501,7 +504,8 @@ class CoreBacktestEngine:
                         'position_size': proper_position_size,
                         'pips': round(pips_moved, 1),
                         'commission_cost': total_commission,
-                        'breakeven_moved': breakeven_moved
+                        'breakeven_moved': breakeven_moved,
+                        'trade_summary': trade_summary
                     }
                 # Check 2.5R target hit (wick-based)
                 elif exit_candle['high'] >= target_price:
@@ -510,6 +514,9 @@ class CoreBacktestEngine:
                     gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
                     total_commission = commission_per_lot * proper_position_size * 2
                     net_pnl = gross_pnl - total_commission
+                    
+                    # Create detailed trade summary
+                    trade_summary = f"{zone_type} zone - Zone High: {stop_loss + risk_distance:.6f}, Zone Low: {stop_loss:.6f}, Entry: {entry_price:.6f}, Stop: {stop_loss:.6f}, Duration: {exit_idx - entry_idx} candles, Result: {pips_moved:+.0f} pips = ${net_pnl:.0f}"
                     
                     return {
                         'zone_type': zone_type,
@@ -524,7 +531,8 @@ class CoreBacktestEngine:
                         'position_size': proper_position_size,
                         'pips': round(pips_moved, 1),
                         'commission_cost': total_commission,
-                        'breakeven_moved': breakeven_moved
+                        'breakeven_moved': breakeven_moved,
+                        'trade_summary': trade_summary
                     }
             else:  # SELL - Wick-based exits with exact break-even
                 # Check stop loss hit (wick-based)
@@ -543,6 +551,9 @@ class CoreBacktestEngine:
                     else:
                         result_type = 'WIN'
                     
+                    # Create detailed trade summary
+                    trade_summary = f"{zone_type} zone - Zone High: {stop_loss:.6f}, Zone Low: {stop_loss - risk_distance:.6f}, Entry: {entry_price:.6f}, Stop: {stop_loss:.6f}, Duration: {exit_idx - entry_idx} candles, Result: {pips_moved:+.0f} pips = ${net_pnl:.0f}"
+                    
                     return {
                         'zone_type': zone_type,
                         'direction': direction,
@@ -556,7 +567,8 @@ class CoreBacktestEngine:
                         'position_size': proper_position_size,
                         'pips': round(pips_moved, 1),
                         'commission_cost': total_commission,
-                        'breakeven_moved': breakeven_moved
+                        'breakeven_moved': breakeven_moved,
+                        'trade_summary': trade_summary
                     }
                 # Check 2.5R target hit (wick-based)
                 elif exit_candle['low'] <= target_price:
@@ -565,6 +577,9 @@ class CoreBacktestEngine:
                     gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
                     total_commission = commission_per_lot * proper_position_size * 2
                     net_pnl = gross_pnl - total_commission
+                    
+                    # Create detailed trade summary
+                    trade_summary = f"{zone_type} zone - Zone High: {stop_loss:.6f}, Zone Low: {stop_loss - risk_distance:.6f}, Entry: {entry_price:.6f}, Stop: {stop_loss:.6f}, Duration: {exit_idx - entry_idx} candles, Result: {pips_moved:+.0f} pips = ${net_pnl:.0f}"
                     
                     return {
                         'zone_type': zone_type,
@@ -579,7 +594,8 @@ class CoreBacktestEngine:
                         'position_size': proper_position_size,
                         'pips': round(pips_moved, 1),
                         'commission_cost': total_commission,
-                        'breakeven_moved': breakeven_moved
+                        'breakeven_moved': breakeven_moved,
+                        'trade_summary': trade_summary
                     }
         
         # Trade still open at end (neutral exit with costs)
@@ -922,6 +938,152 @@ class CoreBacktestEngine:
             print(f"   ⚠️  Pair analysis error: {str(e)}")
             return pd.DataFrame({'Pair': ['Error'], 'Note': [str(e)]})
     
+    def generate_manual_chart_analysis_report(self, result: Dict):
+        """
+        Generate comprehensive Excel report for manual chart analysis
+        Perfect for validating trades against actual charts
+        """
+        print(f"\n📊 GENERATING MANUAL CHART ANALYSIS REPORT...")
+        
+        # Create timestamp for filename
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        pair = result['pair']
+        timeframe = result['timeframe']
+        filename = f"results/manual_chart_analysis_{pair}_{timeframe}_{timestamp}.xlsx"
+        os.makedirs('results', exist_ok=True)
+        
+        try:
+            with pd.ExcelWriter(filename, engine='openpyxl') as writer:
+                
+                # SHEET 1: Trade Summary
+                summary_data = {
+                    'Metric': ['Pair', 'Timeframe', 'Total Trades', 'Winning Trades', 'Losing Trades', 
+                            'Breakeven Trades', 'Win Rate %', 'Loss Rate %', 'BE Rate %', 
+                            'Profit Factor', 'Total P&L', 'Gross Profit', 'Gross Loss', 
+                            'Total Return %', 'Avg Trade Duration (days)'],
+                    'Value': [result['pair'], result['timeframe'], result['total_trades'], 
+                            result['winning_trades'], result['losing_trades'], result['breakeven_trades'],
+                            f"{result['win_rate']:.1f}%", f"{result['loss_rate']:.1f}%", f"{result['be_rate']:.1f}%",
+                            result['profit_factor'], f"${result['total_pnl']:.2f}", 
+                            f"${result['gross_profit']:.2f}", f"${result['gross_loss']:.2f}",
+                            f"{result['total_return']:.2f}%", f"{result['avg_trade_duration']:.1f}"]
+                }
+                summary_df = pd.DataFrame(summary_data)
+                summary_df.to_excel(writer, sheet_name='Performance_Summary', index=False)
+                print("   ✅ Sheet 1: Performance Summary")
+                
+                # SHEET 2: Detailed Trade List for Chart Validation
+                if result['trades']:
+                    trades_data = []
+                    for i, trade in enumerate(result['trades'], 1):
+                        trades_data.append({
+                            'Trade_Number': i,
+                            'Trade_Summary': trade.get('trade_summary', f"{trade['zone_type']} - {trade['result']}"),
+                            'Zone_Type': trade['zone_type'],
+                            'Direction': trade['direction'],
+                            'Entry_Date': trade['entry_date'].strftime('%Y-%m-%d') if hasattr(trade['entry_date'], 'strftime') else str(trade['entry_date']),
+                            'Exit_Date': trade['exit_date'].strftime('%Y-%m-%d') if hasattr(trade['exit_date'], 'strftime') else str(trade['exit_date']),
+                            'Entry_Price': f"{trade['entry_price']:.6f}",
+                            'Exit_Price': f"{trade['exit_price']:.6f}",
+                            'Result': trade['result'],
+                            'Pips': f"{trade['pips']:+.1f}",
+                            'PnL': f"${trade['pnl']:.2f}",
+                            'Duration_Days': trade['duration_days'],
+                            'Position_Size': f"{trade['position_size']:.4f}",
+                            'Commission_Cost': f"${trade['commission_cost']:.2f}",
+                            'Breakeven_Moved': 'Yes' if trade['breakeven_moved'] else 'No'
+                        })
+                    
+                    trades_df = pd.DataFrame(trades_data)
+                    trades_df.to_excel(writer, sheet_name='Trade_Details_For_Charts', index=False)
+                    print("   ✅ Sheet 2: Trade Details for Chart Validation")
+                    
+                    # SHEET 3: Winning Trades Analysis
+                    winning_trades = [t for t in result['trades'] if t['result'] == 'WIN']
+                    if winning_trades:
+                        win_data = []
+                        for i, trade in enumerate(winning_trades, 1):
+                            win_data.append({
+                                'Win_Number': i,
+                                'Trade_Summary': trade.get('trade_summary', f"Win #{i}: {trade['zone_type']} zone"),
+                                'Zone_Type': trade['zone_type'],
+                                'Entry_Date': trade['entry_date'].strftime('%Y-%m-%d') if hasattr(trade['entry_date'], 'strftime') else str(trade['entry_date']),
+                                'Entry_Price': f"{trade['entry_price']:.6f}",
+                                'Exit_Price': f"{trade['exit_price']:.6f}",
+                                'Pips_Won': f"+{trade['pips']:.1f}",
+                                'Profit': f"${trade['pnl']:.2f}",
+                                'Duration': f"{trade['duration_days']} days",
+                                'Breakeven_Used': 'Yes' if trade['breakeven_moved'] else 'No'
+                            })
+                        
+                        wins_df = pd.DataFrame(win_data)
+                        wins_df.to_excel(writer, sheet_name='Winning_Trades', index=False)
+                        print("   ✅ Sheet 3: Winning Trades Analysis")
+                    
+                    # SHEET 4: Losing Trades Analysis
+                    losing_trades = [t for t in result['trades'] if t['result'] == 'LOSS']
+                    if losing_trades:
+                        loss_data = []
+                        for i, trade in enumerate(losing_trades, 1):
+                            loss_data.append({
+                                'Loss_Number': i,
+                                'Trade_Summary': trade.get('trade_summary', f"Loss #{i}: {trade['zone_type']} zone"),
+                                'Zone_Type': trade['zone_type'],
+                                'Entry_Date': trade['entry_date'].strftime('%Y-%m-%d') if hasattr(trade['entry_date'], 'strftime') else str(trade['entry_date']),
+                                'Entry_Price': f"{trade['entry_price']:.6f}",
+                                'Exit_Price': f"{trade['exit_price']:.6f}",
+                                'Pips_Lost': f"{trade['pips']:.1f}",
+                                'Loss_Amount': f"${trade['pnl']:.2f}",
+                                'Duration': f"{trade['duration_days']} days",
+                                'Breakeven_Attempted': 'Yes' if trade['breakeven_moved'] else 'No'
+                            })
+                        
+                        losses_df = pd.DataFrame(loss_data)
+                        losses_df.to_excel(writer, sheet_name='Losing_Trades', index=False)
+                        print("   ✅ Sheet 4: Losing Trades Analysis")
+                    
+                    # SHEET 5: Breakeven Trades Analysis
+                    breakeven_trades = [t for t in result['trades'] if t['result'] == 'BREAKEVEN']
+                    if breakeven_trades:
+                        be_data = []
+                        for i, trade in enumerate(breakeven_trades, 1):
+                            be_data.append({
+                                'BE_Number': i,
+                                'Trade_Summary': trade.get('trade_summary', f"BE #{i}: {trade['zone_type']} zone"),
+                                'Zone_Type': trade['zone_type'],
+                                'Entry_Date': trade['entry_date'].strftime('%Y-%m-%d') if hasattr(trade['entry_date'], 'strftime') else str(trade['entry_date']),
+                                'Entry_Price': f"{trade['entry_price']:.6f}",
+                                'Exit_Price': f"{trade['exit_price']:.6f}",
+                                'Commission_Cost': f"${trade['commission_cost']:.2f}",
+                                'Duration': f"{trade['duration_days']} days",
+                                'Note': '1R hit, moved to breakeven, then stopped out'
+                            })
+                        
+                        be_df = pd.DataFrame(be_data)
+                        be_df.to_excel(writer, sheet_name='Breakeven_Trades', index=False)
+                        print("   ✅ Sheet 5: Breakeven Trades Analysis")
+                
+                else:
+                    # No trades found
+                    empty_df = pd.DataFrame({'Note': ['No trades found for this pair/timeframe combination']})
+                    empty_df.to_excel(writer, sheet_name='No_Trades_Found', index=False)
+                    print("   ⚠️  No trades to analyze")
+            
+            print(f"\n📁 MANUAL CHART ANALYSIS REPORT SAVED:")
+            print(f"   File: {filename}")
+            print(f"   📊 {len(result.get('trades', []))} trades ready for chart validation")
+            print(f"   📈 Use this report to manually verify each trade against your charts")
+            print(f"   🎯 Each trade includes entry/exit dates and prices for easy chart lookup")
+            
+        except Exception as e:
+            print(f"❌ Error creating manual chart analysis report: {str(e)}")
+            # Fallback: Save basic CSV
+            if result.get('trades'):
+                csv_filename = filename.replace('.xlsx', '.csv')
+                trades_df = pd.DataFrame(result['trades'])
+                trades_df.to_csv(csv_filename, index=False)
+                print(f"📁 Fallback CSV saved: {csv_filename}")
+    
     def check_system_resources(self) -> bool:
         """Check system resources before heavy analysis"""
         memory_gb = psutil.virtual_memory().total / (1024**3)
@@ -1076,8 +1238,8 @@ def main():
             print("Analysis cancelled")
     
     elif choice == '4':
-        # Custom single test
-        print("\n🎯 CUSTOM SINGLE TEST:")
+        # Custom single test with comprehensive reporting
+        print("\n🎯 CUSTOM SINGLE TEST WITH MANUAL CHART ANALYSIS:")
         pairs = engine.discover_all_pairs()
         print(f"Available pairs: {', '.join(pairs[:10])}..." if len(pairs) > 10 else f"Available pairs: {', '.join(pairs)}")
         
@@ -1093,9 +1255,19 @@ def main():
             print(f"   Pair: {result['pair']} {result['timeframe']}")
             print(f"   Trades: {result['total_trades']}")
             print(f"   Win Rate: {result['win_rate']:.1f}%")
+            print(f"   Loss Rate: {result['loss_rate']:.1f}%")
+            print(f"   BE Rate: {result['be_rate']:.1f}%")
             print(f"   Profit Factor: {result['profit_factor']:.2f}")
             print(f"   Total Return: {result['total_return']:.2f}%")
+            print(f"   Average Duration: {result['avg_trade_duration']:.1f} days")
             
+            # Generate comprehensive Excel report for manual chart analysis
+            if result['total_trades'] > 0:
+                print(f"\n📋 GENERATING MANUAL CHART ANALYSIS REPORT...")
+                engine.generate_manual_chart_analysis_report(result)
+            else:
+                print(f"   Issue: {result.get('description', 'No trades found')}")
+                
         except ValueError:
             print("❌ Invalid input")
     
