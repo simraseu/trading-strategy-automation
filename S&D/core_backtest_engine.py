@@ -432,39 +432,58 @@ class CoreBacktestEngine:
             else:
                 current_rr = (entry_price - exit_candle['close']) / risk_distance if risk_distance > 0 else 0
             
-            # Move to break-even at 1R
-            if not breakeven_moved and current_rr >= 1.0:
-                current_stop = entry_price
-                breakeven_moved = True
-            
-            # Check stops and targets with REALISTIC P&L
+            # Calculate 1R target for break-even trigger
+            one_r_target = entry_price + risk_distance if direction == 'BUY' else entry_price - risk_distance
+
+            # Check for 1R hit FIRST (wick-based) - triggers break-even move
+            if not breakeven_moved:
+                if direction == 'BUY' and exit_candle['high'] >= one_r_target:
+                    current_stop = entry_price  # Move stop to EXACT entry price
+                    breakeven_moved = True
+                    print(f"      🔄 1R hit! Moved stop to break-even (entry: {entry_price})")
+                elif direction == 'SELL' and exit_candle['low'] <= one_r_target:
+                    current_stop = entry_price  # Move stop to EXACT entry price
+                    breakeven_moved = True
+                    print(f"      🔄 1R hit! Moved stop to break-even (entry: {entry_price})")
+
+            # Check stops and targets with WICK-BASED exits
             if direction == 'BUY':
+                # Check stop loss hit (wick-based)
                 if exit_candle['low'] <= current_stop:
-                    # Calculate realistic P&L including costs
+                    # Calculate P&L from actual exit price
                     price_diff = current_stop - entry_price
                     pips_moved = price_diff / 0.0001
                     gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
-                    total_commission = commission_per_lot * proper_position_size * 2  # Round trip
+                    total_commission = commission_per_lot * proper_position_size * 2
                     net_pnl = gross_pnl - total_commission
+                    
+                    # Classify result based on break-even status
+                    if breakeven_moved and current_stop == entry_price:
+                        result_type = 'BREAKEVEN'  # Exact break-even
+                    elif net_pnl < 0:
+                        result_type = 'LOSS'
+                    else:
+                        result_type = 'WIN'
                     
                     return {
                         'zone_type': zone_type,
                         'direction': direction,
                         'entry_price': entry_price,
                         'exit_price': current_stop,
-                        'result': 'LOSS' if net_pnl < -10 else ('BREAKEVEN' if abs(net_pnl) <= 10 else 'WIN'),
+                        'result': result_type,
                         'pnl': round(net_pnl, 2),
                         'duration_days': exit_idx - entry_idx,
                         'position_size': proper_position_size,
                         'pips': round(pips_moved, 1),
-                        'commission_cost': total_commission
+                        'commission_cost': total_commission,
+                        'breakeven_moved': breakeven_moved
                     }
+                # Check 2.5R target hit (wick-based)
                 elif exit_candle['high'] >= target_price:
-                    # Calculate realistic P&L for win including costs
                     price_diff = target_price - entry_price
                     pips_moved = price_diff / 0.0001
                     gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
-                    total_commission = commission_per_lot * proper_position_size * 2  # Round trip
+                    total_commission = commission_per_lot * proper_position_size * 2
                     net_pnl = gross_pnl - total_commission
                     
                     return {
@@ -477,9 +496,11 @@ class CoreBacktestEngine:
                         'duration_days': exit_idx - entry_idx,
                         'position_size': proper_position_size,
                         'pips': round(pips_moved, 1),
-                        'commission_cost': total_commission
+                        'commission_cost': total_commission,
+                        'breakeven_moved': breakeven_moved
                     }
-            else:  # SELL - Similar logic with costs
+            else:  # SELL - Wick-based exits with exact break-even
+                # Check stop loss hit (wick-based)
                 if exit_candle['high'] >= current_stop:
                     price_diff = entry_price - current_stop
                     pips_moved = price_diff / 0.0001
@@ -487,18 +508,28 @@ class CoreBacktestEngine:
                     total_commission = commission_per_lot * proper_position_size * 2
                     net_pnl = gross_pnl - total_commission
                     
+                    # Classify result based on break-even status
+                    if breakeven_moved and current_stop == entry_price:
+                        result_type = 'BREAKEVEN'  # Exact break-even
+                    elif net_pnl < 0:
+                        result_type = 'LOSS'
+                    else:
+                        result_type = 'WIN'
+                    
                     return {
                         'zone_type': zone_type,
                         'direction': direction,
                         'entry_price': entry_price,
                         'exit_price': current_stop,
-                        'result': 'LOSS' if net_pnl < -10 else ('BREAKEVEN' if abs(net_pnl) <= 10 else 'WIN'),
+                        'result': result_type,
                         'pnl': round(net_pnl, 2),
                         'duration_days': exit_idx - entry_idx,
                         'position_size': proper_position_size,
                         'pips': round(pips_moved, 1),
-                        'commission_cost': total_commission
+                        'commission_cost': total_commission,
+                        'breakeven_moved': breakeven_moved
                     }
+                # Check 2.5R target hit (wick-based)
                 elif exit_candle['low'] <= target_price:
                     price_diff = entry_price - target_price
                     pips_moved = price_diff / 0.0001
@@ -516,7 +547,8 @@ class CoreBacktestEngine:
                         'duration_days': exit_idx - entry_idx,
                         'position_size': proper_position_size,
                         'pips': round(pips_moved, 1),
-                        'commission_cost': total_commission
+                        'commission_cost': total_commission,
+                        'breakeven_moved': breakeven_moved
                     }
             
             # Trade still open at end (neutral exit with costs)
@@ -547,8 +579,11 @@ class CoreBacktestEngine:
         # Basic metrics
         total_trades = len(trades)
         winning_trades = len([t for t in trades if t['pnl'] > 0])
-        losing_trades = total_trades - winning_trades
+        breakeven_trades = len([t for t in trades if t.get('result') == 'BREAKEVEN'])
+        losing_trades = len([t for t in trades if t['pnl'] < 0])
         win_rate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
+        loss_rate = (losing_trades / total_trades) * 100 if total_trades > 0 else 0
+        be_rate = (breakeven_trades / total_trades) * 100 if total_trades > 0 else 0
         
         # P&L calculations
         total_pnl = sum(t['pnl'] for t in trades)
@@ -570,16 +605,19 @@ class CoreBacktestEngine:
             'total_trades': total_trades,
             'winning_trades': winning_trades,
             'losing_trades': losing_trades,
+            'breakeven_trades': breakeven_trades,
             'win_rate': round(win_rate, 1),
+            'loss_rate': round(loss_rate, 1),
+            'be_rate': round(be_rate, 1),
             'profit_factor': round(profit_factor, 2),
             'total_pnl': round(total_pnl, 2),
             'gross_profit': round(gross_profit, 2),
             'gross_loss': round(gross_loss, 2),
             'total_return': round(total_return, 2),
-            'avg_trade_duration': round(avg_duration_actual_days, 1),  # CORRECTED: Now in actual days
-            'avg_trade_duration_candles': round(avg_duration_candles, 1),  # Optional: keep original for debugging
+            'avg_trade_duration': round(avg_duration_actual_days, 1),
+            'avg_trade_duration_candles': round(avg_duration_candles, 1),
             'validation_method': 'walk_forward_realistic',
-            'leg_out_threshold': 2.5,  # Add missing key
+            'leg_out_threshold': 2.5,
             'trades': trades
         }
     
@@ -591,7 +629,10 @@ class CoreBacktestEngine:
             'total_trades': 0,
             'winning_trades': 0,
             'losing_trades': 0,
+            'breakeven_trades': 0,
             'win_rate': 0.0,
+            'loss_rate': 0.0,
+            'be_rate': 0.0,
             'profit_factor': 0.0,
             'total_pnl': 0.0,
             'gross_profit': 0.0,
@@ -800,13 +841,15 @@ class CoreBacktestEngine:
             tf_analysis = df.groupby('timeframe').agg({
                 'profit_factor': ['mean', 'count'],
                 'win_rate': 'mean',
+                'loss_rate': 'mean',
+                'be_rate': 'mean',
                 'total_trades': 'sum',
                 'total_return': 'mean'
             }).round(2)
-            
+
             # Flatten column names
             tf_analysis.columns = ['Avg_Profit_Factor', 'Strategy_Count', 'Avg_Win_Rate', 
-                                 'Total_Trades', 'Avg_Return']
+                                'Avg_Loss_Rate', 'Avg_BE_Rate', 'Total_Trades', 'Avg_Return']
             tf_analysis = tf_analysis.sort_values('Avg_Profit_Factor', ascending=False)
             
             return tf_analysis.reset_index()
@@ -821,13 +864,15 @@ class CoreBacktestEngine:
             pair_analysis = df.groupby('pair').agg({
                 'profit_factor': ['mean', 'count'],
                 'win_rate': 'mean',
+                'loss_rate': 'mean',
+                'be_rate': 'mean',
                 'total_trades': 'sum',
                 'total_return': 'mean'
             }).round(2)
-            
+
             # Flatten column names
             pair_analysis.columns = ['Avg_Profit_Factor', 'Strategy_Count', 'Avg_Win_Rate', 
-                                   'Total_Trades', 'Avg_Return']
+                                'Avg_Loss_Rate', 'Avg_BE_Rate', 'Total_Trades', 'Avg_Return']
             pair_analysis = pair_analysis.sort_values('Avg_Profit_Factor', ascending=False)
             
             return pair_analysis.reset_index()
@@ -957,6 +1002,8 @@ def main():
         print(f"   Pair: {result['pair']} {result['timeframe']}")
         print(f"   Trades: {result['total_trades']}")
         print(f"   Win Rate: {result['win_rate']:.1f}%")
+        print(f"   Loss Rate: {result['loss_rate']:.1f}%")
+        print(f"   BE Rate: {result['be_rate']:.1f}%")
         print(f"   Profit Factor: {result['profit_factor']:.2f}")
         print(f"   Total Return: {result['total_return']:.2f}%")
         
