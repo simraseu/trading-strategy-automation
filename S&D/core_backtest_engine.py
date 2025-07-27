@@ -440,11 +440,9 @@ class CoreBacktestEngine:
                 if direction == 'BUY' and exit_candle['high'] >= one_r_target:
                     current_stop = entry_price  # Move stop to EXACT entry price
                     breakeven_moved = True
-                    print(f"      🔄 1R hit! Moved stop to break-even (entry: {entry_price})")
                 elif direction == 'SELL' and exit_candle['low'] <= one_r_target:
                     current_stop = entry_price  # Move stop to EXACT entry price
                     breakeven_moved = True
-                    print(f"      🔄 1R hit! Moved stop to break-even (entry: {entry_price})")
 
             # Check stops and targets with WICK-BASED exits
             if direction == 'BUY':
@@ -460,6 +458,7 @@ class CoreBacktestEngine:
                     # Classify result based on break-even status
                     if breakeven_moved and current_stop == entry_price:
                         result_type = 'BREAKEVEN'  # Exact break-even
+                        print(f"      ⚖️  BREAKEVEN: 1R hit → moved to entry → stopped out at {current_stop}")
                     elif net_pnl < 0:
                         result_type = 'LOSS'
                     else:
@@ -469,7 +468,9 @@ class CoreBacktestEngine:
                         'zone_type': zone_type,
                         'direction': direction,
                         'entry_price': entry_price,
+                        'entry_date': data.index[entry_idx],
                         'exit_price': current_stop,
+                        'exit_date': data.index[exit_idx],
                         'result': result_type,
                         'pnl': round(net_pnl, 2),
                         'duration_days': exit_idx - entry_idx,
@@ -490,7 +491,9 @@ class CoreBacktestEngine:
                         'zone_type': zone_type,
                         'direction': direction,
                         'entry_price': entry_price,
+                        'entry_date': data.index[entry_idx],
                         'exit_price': target_price,
+                        'exit_date': data.index[exit_idx],
                         'result': 'WIN',
                         'pnl': round(net_pnl, 2),
                         'duration_days': exit_idx - entry_idx,
@@ -511,6 +514,7 @@ class CoreBacktestEngine:
                     # Classify result based on break-even status
                     if breakeven_moved and current_stop == entry_price:
                         result_type = 'BREAKEVEN'  # Exact break-even
+                        print(f"      ⚖️  BREAKEVEN: 1R hit → moved to entry → stopped out at {current_stop}")
                     elif net_pnl < 0:
                         result_type = 'LOSS'
                     else:
@@ -520,7 +524,9 @@ class CoreBacktestEngine:
                         'zone_type': zone_type,
                         'direction': direction,
                         'entry_price': entry_price,
+                        'entry_date': data.index[entry_idx],
                         'exit_price': current_stop,
+                        'exit_date': data.index[exit_idx],
                         'result': result_type,
                         'pnl': round(net_pnl, 2),
                         'duration_days': exit_idx - entry_idx,
@@ -541,7 +547,9 @@ class CoreBacktestEngine:
                         'zone_type': zone_type,
                         'direction': direction,
                         'entry_price': entry_price,
+                        'entry_date': data.index[entry_idx],
                         'exit_price': target_price,
+                        'exit_date': data.index[exit_idx],
                         'result': 'WIN',
                         'pnl': round(net_pnl, 2),
                         'duration_days': exit_idx - entry_idx,
