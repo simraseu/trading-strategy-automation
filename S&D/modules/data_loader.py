@@ -122,10 +122,39 @@ class DataLoader:
         existing_renames = {old: new for old, new in rename_map.items() if old in cleaned_data.columns}
         cleaned_data.rename(columns=existing_renames, inplace=True)
         
-        # Convert datetime with robust format handling
+        # FIXED: Enhanced datetime conversion with better error handling
+        datetime_set = False
+        
+        # Try 'date' column first
         if 'date' in cleaned_data.columns:
+            print(f"   🔄 Converting 'date' column to datetime...")
             cleaned_data['date'] = self._parse_datetime_robust(cleaned_data['date'])
-            cleaned_data.set_index('date', inplace=True)
+            # Check if conversion was successful
+            if not cleaned_data['date'].isna().all():
+                cleaned_data.set_index('date', inplace=True)
+                datetime_set = True
+                print(f"   ✅ DateTime index set from 'date' column")
+            else:
+                print(f"   ❌ Failed to parse 'date' column")
+        
+        # Try 'time' column if 'date' failed
+        if not datetime_set and 'time' in cleaned_data.columns:
+            print(f"   🔄 Converting 'time' column to datetime...")
+            cleaned_data['time'] = self._parse_datetime_robust(cleaned_data['time'])
+            # Check if conversion was successful
+            if not cleaned_data['time'].isna().all():
+                cleaned_data.set_index('time', inplace=True)
+                datetime_set = True
+                print(f"   ✅ DateTime index set from 'time' column")
+            else:
+                print(f"   ❌ Failed to parse 'time' column")
+        
+        # Final check - ensure we have a DatetimeIndex
+        if datetime_set and isinstance(cleaned_data.index, pd.DatetimeIndex):
+            print(f"   ✅ Confirmed DatetimeIndex: {cleaned_data.index[0]} to {cleaned_data.index[-1]}")
+        else:
+            print(f"   ⚠️  WARNING: No DatetimeIndex created - using RangeIndex")
+            print(f"   Available columns: {cleaned_data.columns.tolist()}")
         
         # Convert price columns to numeric
         price_columns = ['open', 'high', 'low', 'close']
@@ -193,14 +222,15 @@ class DataLoader:
             date_str = str(date_val).strip()
             
             # Try UNIX timestamp first (all digits)
-            if date_str.replace('.', '').isdigit():
+            if date_str.replace('.', '').replace('-', '').isdigit():
                 try:
                     # Handle both seconds and milliseconds timestamps
                     timestamp = float(date_str)
                     if timestamp > 1e10:  # Milliseconds
                         timestamp = timestamp / 1000
-                    return pd.to_datetime(timestamp, unit='s')
-                except (ValueError, OSError):
+                    parsed_dt = pd.to_datetime(timestamp, unit='s')
+                    return parsed_dt
+                except (ValueError, OSError, OverflowError):
                     pass
             
             # Try standard pandas parsing for ISO formats
@@ -216,7 +246,9 @@ class DataLoader:
                 '%Y.%m.%d %H:%M:%S',
                 '%Y.%m.%d',
                 '%m/%d/%Y %H:%M:%S',
-                '%m/%d/%Y'
+                '%m/%d/%Y',
+                '%d/%m/%Y %H:%M:%S',
+                '%d/%m/%Y'
             ]
             
             for pattern in format_patterns:
@@ -226,7 +258,6 @@ class DataLoader:
                     continue
             
             # If all fails, return NaT
-            print(f"⚠️  Could not parse date: {date_str}")
             return pd.NaT
         
         # Apply robust parsing
@@ -236,7 +267,14 @@ class DataLoader:
         successful_parses = parsed_dates.notna().sum()
         total_dates = len(date_series)
         success_rate = (successful_parses / total_dates) * 100
-            
+        
+        print(f"   📊 Date parsing: {successful_parses}/{total_dates} successful ({success_rate:.1f}%)")
+        
+        # Show sample of parsed dates for debugging
+        if successful_parses > 0:
+            valid_dates = parsed_dates.dropna()
+            print(f"   📅 Sample dates: {valid_dates.iloc[0]} to {valid_dates.iloc[-1]}")
+        
         return parsed_dates
 
     def validate_data_quality(self, data: pd.DataFrame) -> bool:

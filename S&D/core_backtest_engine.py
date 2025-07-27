@@ -142,23 +142,45 @@ class CoreBacktestEngine:
             return []
     
     def load_data_with_validation(self, pair: str, timeframe: str, days_back: int = 730) -> Optional[pd.DataFrame]:
-        """Load data using updated DataLoader with validation"""
+        """Load data using updated DataLoader with proper date filtering"""
         try:            
-            # Use your updated data loader
+            # Use your updated data loader to get full dataset
             data = self.data_loader.load_pair_data(pair, timeframe)
             
             if data is None or len(data) < 100:
                 return None
             
-            # Limit data if needed (keep some history for indicators)
+            # FIXED: Proper date-based filtering using datetime index
             if days_back < 9999:
-                max_candles = min(days_back + 365, len(data))
-                data = data.iloc[-max_candles:]
+                # Ensure we have a proper datetime index
+                if not isinstance(data.index, pd.DatetimeIndex):
+                    print(f"⚠️  Data does not have DatetimeIndex: {type(data.index)}")
+                    return None
+                
+                # Calculate cutoff date from the most recent data point
+                most_recent_date = data.index[-1]  # This is now guaranteed to be a Timestamp
+                cutoff_date = most_recent_date - pd.Timedelta(days=days_back)
+                
+                # Add buffer for EMA200 calculation (365 days minimum)
+                buffer_date = cutoff_date - pd.Timedelta(days=365)
+                
+                # Filter data from buffer_date onwards to ensure sufficient history
+                data = data[data.index >= buffer_date]
+                
+                # Verify we have enough data after filtering
+                if len(data) < 200:  # Minimum for EMA200 + some trading data
+                    print(f"⚠️  Insufficient data after filtering: {len(data)} candles")
+                    return None
+                
+                print(f"   📅 Date range: {data.index[0].strftime('%Y-%m-%d')} to {data.index[-1].strftime('%Y-%m-%d')}")
+                print(f"   📊 Filtered to {len(data)} candles ({days_back + 365} day period)")
             
             return data
             
         except Exception as e:
             print(f"❌ Error loading {pair} {timeframe}: {str(e)}")
+            import traceback
+            traceback.print_exc()
             return None
     
     def run_single_strategy_test(self, pair: str, timeframe: str, days_back: int = 730) -> Dict:
