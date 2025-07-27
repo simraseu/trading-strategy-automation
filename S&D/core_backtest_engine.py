@@ -267,13 +267,13 @@ class CoreBacktestEngine:
         
         
         # Execute trades with REALISTIC LOGIC
-        trades = self.execute_realistic_trades(valid_patterns, data, trend_data, timeframe)
+        trades = self.execute_realistic_trades(valid_patterns, data, trend_data, timeframe, pair)
         
         # Calculate performance
         return self.calculate_performance_metrics(trades, pair, timeframe)
     
     def execute_realistic_trades(self, patterns: List[Dict], data: pd.DataFrame,
-                               trend_data: pd.DataFrame, timeframe: str) -> List[Dict]:
+                               trend_data: pd.DataFrame, timeframe: str, pair: str) -> List[Dict]:
         """
         Execute trades using REALISTIC LOGIC extracted from distance_edge.py
         but with UPDATED SETTINGS and MODULES
@@ -333,7 +333,8 @@ class CoreBacktestEngine:
                 if not is_aligned:
                     continue
                 
-                # Execute trade with REALISTIC LOGIC
+                # Execute trade with REALISTIC LOGIC - Pass pair info
+                zone['pair'] = pair  # Add pair info to zone for pip value detection
                 trade_result = self.execute_single_realistic_trade(zone, data, current_idx)
                 
                 if trade_result:
@@ -386,7 +387,9 @@ class CoreBacktestEngine:
         
         # Calculate position size using UPDATED risk config
         risk_amount = 10000 * (RISK_CONFIG['risk_limits']['max_risk_per_trade'] / 100)  # 5% from settings
-        pip_value = 0.0001
+        
+        # FIXED: Dynamic pip value detection instead of hardcoded 0.0001
+        pip_value = self.get_pip_value_for_pair(zone.get('pair', 'EURUSD'))
         stop_distance_pips = abs(entry_price - initial_stop) / pip_value
         
         if stop_distance_pips <= 0:
@@ -406,52 +409,53 @@ class CoreBacktestEngine:
         # Simulate REALISTIC trade outcome with 1R→breakeven management
         return self.simulate_realistic_outcome(
             entry_price, initial_stop, target_price, direction, 
-            position_size, data, current_idx, zone['type']
+            position_size, data, current_idx, zone['type'], stop_distance_pips, zone.get('pair', 'EURUSD')
         )
-    
+
     def simulate_realistic_outcome(self, entry_price: float, stop_loss: float, target_price: float,
                              direction: str, position_size: float, data: pd.DataFrame,
-                             entry_idx: int, zone_type: str) -> Dict:
+                             entry_idx: int, zone_type: str, stop_distance_pips: float, pair: str) -> Dict:
         """
         Simulate REALISTIC trade outcome with proper 1R→breakeven management
-        FIXED: Add realistic transaction costs and proper P&L calculation
+        Clean production version - no debug output
         """
         # Add realistic transaction costs
         spread_pips = 2.0  # 2 pip spread (realistic for major pairs)
         commission_per_lot = 7.0  # $7 per lot commission (realistic retail)
-        pip_value_per_lot = 10.0  # $10 per pip per standard lot
+        
+        # Get pip value for this pair
+        pip_value = self.get_pip_value_for_pair(pair)
         
         # Apply spread cost to entry
         if direction == 'BUY':
-            entry_price += (spread_pips * 0.0001)  # Pay the spread
+            entry_price += (spread_pips * pip_value)  # Pay the spread
         else:
-            entry_price -= (spread_pips * 0.0001)  # Pay the spread
+            entry_price -= (spread_pips * pip_value)  # Pay the spread
         
         risk_distance = abs(entry_price - stop_loss)
         current_stop = stop_loss
         breakeven_moved = False
         
-        # FIXED: Proper position sizing (5% risk = $500 max loss)
+        # Proper position sizing (5% risk = $500 max loss)
         max_risk_amount = 500  # $500 max risk per trade (5% of $10,000)
-        stop_distance_pips = risk_distance / 0.0001
         
-        # Recalculate position size for realistic $500 risk
+        # Correct pip value per lot for JPY pairs
+        if 'JPY' in pair.upper():
+            pip_value_per_lot = 1.0  # $1 per pip for JPY pairs (0.01 movement)
+        else:
+            pip_value_per_lot = 10.0  # $10 per pip for major pairs
+        
+        # Calculate proper position size
         if stop_distance_pips > 0:
             proper_position_size = max_risk_amount / (stop_distance_pips * pip_value_per_lot)
-            # Cap position size to reasonable maximum
-            proper_position_size = min(proper_position_size, 1.0)  # Max 1 standard lot
+            # Apply realistic limits
+            proper_position_size = max(0.01, min(proper_position_size, 1.0))  # Min 0.01, Max 1.0 lot
         else:
             return None
         
         # Look ahead for exit with proper trade management
         for exit_idx in range(entry_idx + 1, min(entry_idx + 50, len(data))):  # Limit to 50 candles
             exit_candle = data.iloc[exit_idx]
-            
-            # Calculate current R:R for break-even move
-            if direction == 'BUY':
-                current_rr = (exit_candle['close'] - entry_price) / risk_distance if risk_distance > 0 else 0
-            else:
-                current_rr = (entry_price - exit_candle['close']) / risk_distance if risk_distance > 0 else 0
             
             # Calculate 1R target for break-even trigger
             one_r_target = entry_price + risk_distance if direction == 'BUY' else entry_price - risk_distance
@@ -471,7 +475,7 @@ class CoreBacktestEngine:
                 if exit_candle['low'] <= current_stop:
                     # Calculate P&L from actual exit price
                     price_diff = current_stop - entry_price
-                    pips_moved = price_diff / 0.0001
+                    pips_moved = price_diff / pip_value
                     gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
                     total_commission = commission_per_lot * proper_position_size * 2
                     net_pnl = gross_pnl - total_commission
@@ -479,7 +483,6 @@ class CoreBacktestEngine:
                     # Classify result based on break-even status
                     if breakeven_moved and current_stop == entry_price:
                         result_type = 'BREAKEVEN'  # Exact break-even
-                        print(f"      ⚖️  BREAKEVEN: 1R hit → moved to entry → stopped out at {current_stop}")
                     elif net_pnl < 0:
                         result_type = 'LOSS'
                     else:
@@ -503,7 +506,7 @@ class CoreBacktestEngine:
                 # Check 2.5R target hit (wick-based)
                 elif exit_candle['high'] >= target_price:
                     price_diff = target_price - entry_price
-                    pips_moved = price_diff / 0.0001
+                    pips_moved = price_diff / pip_value
                     gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
                     total_commission = commission_per_lot * proper_position_size * 2
                     net_pnl = gross_pnl - total_commission
@@ -527,7 +530,7 @@ class CoreBacktestEngine:
                 # Check stop loss hit (wick-based)
                 if exit_candle['high'] >= current_stop:
                     price_diff = entry_price - current_stop
-                    pips_moved = price_diff / 0.0001
+                    pips_moved = price_diff / pip_value
                     gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
                     total_commission = commission_per_lot * proper_position_size * 2
                     net_pnl = gross_pnl - total_commission
@@ -535,7 +538,6 @@ class CoreBacktestEngine:
                     # Classify result based on break-even status
                     if breakeven_moved and current_stop == entry_price:
                         result_type = 'BREAKEVEN'  # Exact break-even
-                        print(f"      ⚖️  BREAKEVEN: 1R hit → moved to entry → stopped out at {current_stop}")
                     elif net_pnl < 0:
                         result_type = 'LOSS'
                     else:
@@ -559,7 +561,7 @@ class CoreBacktestEngine:
                 # Check 2.5R target hit (wick-based)
                 elif exit_candle['low'] <= target_price:
                     price_diff = entry_price - target_price
-                    pips_moved = price_diff / 0.0001
+                    pips_moved = price_diff / pip_value
                     gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
                     total_commission = commission_per_lot * proper_position_size * 2
                     net_pnl = gross_pnl - total_commission
@@ -579,9 +581,9 @@ class CoreBacktestEngine:
                         'commission_cost': total_commission,
                         'breakeven_moved': breakeven_moved
                     }
-            
-            # Trade still open at end (neutral exit with costs)
-            return None
+        
+        # Trade still open at end (neutral exit with costs)
+        return None
     
     def calculate_performance_metrics(self, trades: List[Dict], pair: str, timeframe: str) -> Dict:
         """Calculate comprehensive performance metrics with CORRECTED duration conversion"""
@@ -649,6 +651,16 @@ class CoreBacktestEngine:
             'leg_out_threshold': 2.5,
             'trades': trades
         }
+    
+    def get_pip_value_for_pair(self, pair: str) -> float:
+        """
+        Get correct pip value for currency pair
+        CRITICAL: JPY pairs use 0.01, others use 0.0001
+        """
+        if 'JPY' in pair.upper():
+            return 0.01
+        else:
+            return 0.0001
     
     def create_empty_result(self, pair: str, timeframe: str, reason: str) -> Dict:
         """Create empty result structure"""
