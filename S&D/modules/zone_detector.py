@@ -578,7 +578,7 @@ class ZoneDetector:
     def check_zone_testing(self, zone: Dict, data: pd.DataFrame, 
                       evaluation_date: Optional[int] = None) -> Tuple[bool, str]:
         """
-        Check if zone was valid at specific point in time with CORRECT approach direction logic
+        WICK-BASED ZONE INVALIDATION - 50% penetration rule (NO CLOSE prices)
         
         Args:
             zone: Zone dictionary with zone boundaries and formation indices
@@ -590,9 +590,9 @@ class ZoneDetector:
             - is_valid: True if zone was untested up to evaluation_date
             - reason: Explanation of validation result
             
-        CORRECT LOGIC:
-        - Demand zones: Only test when price approaches FROM BELOW and penetrates UP
-        - Supply zones: Only test when price approaches FROM ABOVE and penetrates DOWN
+        WICK-BASED LOGIC:
+        - Demand zones: Invalidated if WICK penetrates 50% below zone_low
+        - Supply zones: Invalidated if WICK penetrates 50% above zone_high
         """
         try:
             zone_end_idx = zone['end_idx']
@@ -627,49 +627,21 @@ class ZoneDetector:
             if len(candles_to_check) == 0:
                 return True, "Zone untested - no candles in evaluation window"
 
-            # CORRECTED LOGIC: Check approach direction before applying penetration rules
+            # WICK-BASED INVALIDATION LOGIC (50% penetration)
             for i, candle in candles_to_check.iterrows():
                 candle_idx = i  # Integer index
                 
                 if zone_type in ['R-B-R', 'D-B-R']:  # Demand zones (bullish leg-out)
-                    
-                    # CORRECTED DEMAND ZONE LOGIC: 
-                    # Demand zones have BULLISH leg-out → Price approaches from ABOVE
-                    # We only test when price comes back DOWN to the zone from above
-                    
-                    # Check if price is approaching the zone from above (natural retracement)
-                    is_approaching_from_above = (
-                        candle['low'] <= zone_high and      # Price has reached zone from above
-                        candle['high'] >= zone_low          # Price is within or touching zone range
-                    )
-                    
-                    if is_approaching_from_above:
-                        # Single Rule: 33% wick penetration through BOTTOM of zone
-                        wick_test_level = zone_low + (zone_size * 0.33)
-                        if candle['low'] < wick_test_level:
-                            return False, f"Demand zone tested at index {candle_idx} - wick penetrated 33% level at {wick_test_level:.5f} (low: {candle['low']:.5f})"
-                    
-                    # If price is completely above zone, ignore (not yet approaching)
+                    # Invalidated if LOW WICK penetrates 50% below zone_low
+                    invalidation_level = zone_low - (zone_size * 0.50)
+                    if candle['low'] < invalidation_level:
+                        return False, f"Demand zone invalidated at index {candle_idx} - wick penetrated 50% level at {invalidation_level:.5f} (low: {candle['low']:.5f})"
                         
                 elif zone_type in ['D-B-D', 'R-B-D']:  # Supply zones (bearish leg-out)
-                    
-                    # CORRECTED SUPPLY ZONE LOGIC:
-                    # Supply zones have BEARISH leg-out → Price approaches from BELOW
-                    # We only test when price comes back UP to the zone from below
-                    
-                    # Check if price is approaching the zone from below (natural retracement)
-                    is_approaching_from_below = (
-                        candle['high'] >= zone_low and      # Price has reached zone from below
-                        candle['low'] <= zone_high          # Price is within or touching zone range
-                    )
-                    
-                    if is_approaching_from_below:
-                        # Single Rule: 33% wick penetration through TOP of zone
-                        wick_test_level = zone_high - (zone_size * 0.33)
-                        if candle['high'] > wick_test_level:
-                            return False, f"Supply zone tested at index {candle_idx} - wick penetrated 33% level at {wick_test_level:.5f} (high: {candle['high']:.5f})"
-                    
-                    # If price is completely below zone, ignore (not yet approaching)
+                    # Invalidated if HIGH WICK penetrates 50% above zone_high
+                    invalidation_level = zone_high + (zone_size * 0.50)
+                    if candle['high'] > invalidation_level:
+                        return False, f"Supply zone invalidated at index {candle_idx} - wick penetrated 50% level at {invalidation_level:.5f} (high: {candle['high']:.5f})"
                 
                 else:
                     return False, f"Unknown zone type: {zone_type}"
