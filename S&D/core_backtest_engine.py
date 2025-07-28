@@ -275,12 +275,12 @@ class CoreBacktestEngine:
     def execute_realistic_trades(self, patterns: List[Dict], data: pd.DataFrame,
                            trend_data: pd.DataFrame, timeframe: str, pair: str) -> List[Dict]:
         """
-        OPTIMIZED: Execute trades with performance-optimized zone validation
-        Uses WICK-based invalidation (50% penetration) and maintains realistic logic
+        Execute trades with realistic zone activation and trade management
+        Zones must be left by price before becoming tradeable
         """
         trades = []
         used_zones = set()
-        invalidated_zones = set()  # Cache invalidated zones
+        invalidated_zones = set()
         
         # Get backtest start date (first 200 candles are for EMA warm-up)
         backtest_start_idx = 200
@@ -295,7 +295,7 @@ class CoreBacktestEngine:
             if zone_end_idx is not None and zone_end_idx >= backtest_start_idx:
                 zone_formation_date = data.index[zone_end_idx]
                 pattern['formation_date'] = zone_formation_date
-                # Pre-calculate zone invalidation levels for performance (WICK-based 50%)
+                # Pre-calculate zone invalidation levels
                 pattern['invalidation_level'] = self.precalculate_invalidation_level(pattern)
                 valid_patterns.append(pattern)
         
@@ -303,13 +303,14 @@ class CoreBacktestEngine:
             print(f"   ⚠️  No zones formed during backtest period - no trades possible")
             return trades
         
-        print(f"   🎯 Trading {len(valid_patterns)} zones formed during backtest (excluded {len(patterns) - len(valid_patterns)} historical zones)")
+        print(f"   🎯 Trading {len(valid_patterns)} zones formed during backtest")
         
-        # Build optimized zone activation schedule
+        # Build zone activation schedule
         zone_activation_schedule = []
         for pattern in valid_patterns:
             zone_end_idx = pattern['end_idx']
-            activation_idx = pattern.get('validation_completion_idx', zone_end_idx) + 3  # 3 candle delay
+            # Zone becomes active N candles after formation
+            activation_idx = zone_end_idx + 3
             zone_activation_schedule.append({
                 'activation_idx': activation_idx,
                 'pattern': pattern,
@@ -320,19 +321,19 @@ class CoreBacktestEngine:
         active_zones = []
         activation_pointer = 0
         
-        # OPTIMIZED: Process each candle with minimal calculations
+        # Process each candle
         for current_idx in range(backtest_start_idx, len(data)):
             current_candle = data.iloc[current_idx]
             
-            # Activate new zones (O(1) amortized)
+            # Activate new zones that are ready
             while (activation_pointer < len(zone_activation_schedule) and 
-                   zone_activation_schedule[activation_pointer]['activation_idx'] <= current_idx):
+                zone_activation_schedule[activation_pointer]['activation_idx'] <= current_idx):
                 zone_info = zone_activation_schedule[activation_pointer]
                 if zone_info['zone_id'] not in used_zones:
                     active_zones.append(zone_info['pattern'])
                 activation_pointer += 1
             
-            # OPTIMIZED: Check active zones with fast invalidation and interaction checks
+            # Check active zones for trades
             for zone in active_zones.copy():
                 zone_id = f"{zone['type']}_{zone.get('end_idx', 0)}_{zone['zone_low']:.5f}"
                 
@@ -340,16 +341,16 @@ class CoreBacktestEngine:
                     active_zones.remove(zone)
                     continue
                 
-                # FAST WICK-based invalidation check (50% penetration)
+                # Check for zone invalidation (50% penetration)
                 if self.fast_wick_invalidation_check(zone, current_candle, zone_id, invalidated_zones):
                     active_zones.remove(zone)
                     continue
                 
-                # FAST zone interaction check
+                # Check if price interacts with zone
                 if not self.fast_zone_interaction_check(zone, current_candle):
                     continue
                 
-                # Quick trend alignment check
+                # Check trend alignment
                 current_trend = trend_data['trend'].iloc[current_idx] if current_idx < len(trend_data) else 'bullish'
                 if not self.is_trend_aligned(zone['type'], current_trend):
                     continue
@@ -363,7 +364,7 @@ class CoreBacktestEngine:
                     active_zones.remove(zone)
                     trades.append(trade_result)
         
-        print(f"   ✅ Executed {len(trades)} realistic trades from {len(valid_patterns)} valid zones")
+        print(f"   ✅ Executed {len(trades)} realistic trades")
         return trades
     
     def precalculate_invalidation_level(self, zone: Dict) -> float:
@@ -419,33 +420,39 @@ class CoreBacktestEngine:
     def execute_single_realistic_trade(self, zone: Dict, data: pd.DataFrame, current_idx: int) -> Optional[Dict]:
         """
         Execute single trade using REALISTIC 1R→2.5R management
-        CORRECTED: Fixed zone approach direction logic
+        Entry triggers when price touches the entry level (like a limit order)
         """
         zone_high = zone['zone_high']
         zone_low = zone['zone_low']
         zone_range = zone_high - zone_low
         
-        # CORRECTED: Entry and stop logic - Front-run BEYOND zone boundaries
-        if zone['type'] in ['R-B-R', 'D-B-R']:  # Demand zones (buy) - front-run ABOVE zone
-            entry_price = zone_high + (zone_range * 0.05)  # 5% ABOVE zone (front-run)
+        # Entry and stop logic - Front-run beyond zone boundaries
+        if zone['type'] in ['R-B-R', 'D-B-R']:  # Demand zones (buy)
+            entry_price = zone_high + (zone_range * 0.05)  # 5% above zone
             direction = 'BUY'
             initial_stop = zone_low - (zone_range * 0.33)  # 33% buffer below zone
-        elif zone['type'] in ['D-B-D', 'R-B-D']:  # Supply zones (sell) - front-run BELOW zone
-            entry_price = zone_low - (zone_range * 0.05)  # 5% BELOW zone (front-run)
+        elif zone['type'] in ['D-B-D', 'R-B-D']:  # Supply zones (sell)
+            entry_price = zone_low - (zone_range * 0.05)  # 5% below zone
             direction = 'SELL'
             initial_stop = zone_high + (zone_range * 0.33)  # 33% buffer above zone
         else:
             return None
         
-        # OPTIMIZED: Fast entry validation without excessive printing
+        # Check if current candle can trigger entry (like a limit order)
         current_candle = data.iloc[current_idx]
         
+        can_enter = False
         if direction == 'BUY':
-            if not (current_candle['high'] >= entry_price and current_candle['low'] <= zone_high):
-                return None
+            # Buy limit order triggers if high touches or exceeds entry price
+            if current_candle['high'] >= entry_price:
+                can_enter = True
         elif direction == 'SELL':
-            if not (current_candle['low'] <= entry_price and current_candle['high'] >= zone_low):
-                return None
+            # Sell limit order triggers if low touches or falls below entry price
+            if current_candle['low'] <= entry_price:
+                can_enter = True
+        
+        if not can_enter:
+            return None
         
         # Calculate position size using UPDATED risk config
         risk_amount = 10000 * (RISK_CONFIG['risk_limits']['max_risk_per_trade'] / 100)  # 5% from settings
