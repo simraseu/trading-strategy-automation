@@ -131,10 +131,9 @@ class ZoneDetector:
                 if not base_sequence:
                     continue
                 
-                # CORRECTED FIX: Only check base sequence reuse (the original working approach)
+                # REMOVED: Base sequence restriction - allow multiple zones from same area
+                # This was preventing valid zones from being detected
                 base_sequence_id = base_sequence['base_sequence_id']
-                if base_sequence_id in self.used_base_sequences:
-                    continue  # Skip - this base sequence already created a zone
                 
                 # STEP 3: Find bearish leg-out immediately after base sequence
                 leg_out_start = base_sequence['end_idx'] + 1
@@ -152,8 +151,8 @@ class ZoneDetector:
                 )
                 pattern['category'] = 'momentum'
                 
-                # CRITICAL FIX: Mark this base sequence as used
-                self.used_base_sequences.add(base_sequence_id)
+                # REMOVED: Base sequence tracking - allow all valid zones
+                # self.used_base_sequences.add(base_sequence_id)  # REMOVED
                 self.created_zones.append(pattern)
                 patterns.append(pattern)
                 
@@ -180,10 +179,9 @@ class ZoneDetector:
                 if not base_sequence:
                     continue
                 
-                # CORRECTED FIX: Only check base sequence reuse (the original working approach)
+                # REMOVED: Base sequence restriction - allow multiple zones from same area
+                # This was preventing valid zones from being detected
                 base_sequence_id = base_sequence['base_sequence_id']
-                if base_sequence_id in self.used_base_sequences:
-                    continue  # Skip - this base sequence already created a zone
                 
                 # STEP 3: Find bullish leg-out immediately after base sequence
                 leg_out_start = base_sequence['end_idx'] + 1
@@ -201,8 +199,8 @@ class ZoneDetector:
                 )
                 pattern['category'] = 'momentum'
                 
-                # CRITICAL FIX: Mark this base sequence as used
-                self.used_base_sequences.add(base_sequence_id)
+                # REMOVED: Base sequence tracking - allow all valid zones
+                # self.used_base_sequences.add(base_sequence_id)  # REMOVED
                 self.created_zones.append(pattern)
                 patterns.append(pattern)
                 
@@ -233,10 +231,9 @@ class ZoneDetector:
                 if not leg_out:
                     continue
                 
-                # CORRECTED FIX: Only check base sequence reuse (the original working approach)
+                # REMOVED: Base sequence restriction - allow multiple zones from same area
+                # This was preventing valid zones from being detected
                 base_sequence_id = base_sequence['base_sequence_id']
-                if base_sequence_id in self.used_base_sequences:
-                    continue  # Skip - this base sequence already created a zone
                 
                 # STEP 5: Create D-B-R pattern and mark base sequence as used
                 pattern = self.create_pattern(
@@ -248,8 +245,8 @@ class ZoneDetector:
                 )
                 pattern['category'] = 'reversal'
                 
-                # CRITICAL FIX: Mark this base sequence as used
-                self.used_base_sequences.add(base_sequence_id)
+                # REMOVED: Base sequence tracking - allow all valid zones
+                # self.used_base_sequences.add(base_sequence_id)  # REMOVED
                 self.created_zones.append(pattern)
                 patterns.append(pattern)
                 
@@ -280,10 +277,9 @@ class ZoneDetector:
                 if not leg_out:
                     continue
                 
-                # CORRECTED FIX: Only check base sequence reuse (the original working approach)
+                # REMOVED: Base sequence restriction - allow multiple zones from same area
+                # This was preventing valid zones from being detected
                 base_sequence_id = base_sequence['base_sequence_id']
-                if base_sequence_id in self.used_base_sequences:
-                    continue  # Skip - this base sequence already created a zone
                 
                 # STEP 5: Create R-B-D pattern and mark base sequence as used
                 pattern = self.create_pattern(
@@ -295,8 +291,8 @@ class ZoneDetector:
                 )
                 pattern['category'] = 'reversal'
                 
-                # CRITICAL FIX: Mark this base sequence as used
-                self.used_base_sequences.add(base_sequence_id)
+                # REMOVED: Base sequence tracking - allow all valid zones
+                # self.used_base_sequences.add(base_sequence_id)  # REMOVED
                 self.created_zones.append(pattern)
                 patterns.append(pattern)
                 
@@ -798,5 +794,6 @@ class ZoneDetector:
 
     def reset_zone_tracking(self):
         """Reset tracking for new dataset"""
-        self.used_base_sequences.clear()
+        # REMOVED base sequence tracking to allow all valid zones
+        # self.used_base_sequences.clear()  # REMOVED
         self.created_zones.clear()

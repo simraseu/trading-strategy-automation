@@ -356,9 +356,13 @@ class CoreBacktestEngine:
                 if not self.check_limit_order_trigger(zone, current_candle):
                     continue
                 
+                # CRITICAL FIX: Mark zone as used when entry is touched
+                used_zones.add(zone_id)  # Zone is used regardless of filters
+                
                 # THIRD: Check trend alignment
                 current_trend = trend_data['trend'].iloc[current_idx] if current_idx < len(trend_data) else 'bullish'
                 if not self.is_trend_aligned(zone['type'], current_trend):
+                    print(f"   ⚠️ Zone {zone_id} entry touched but trend misaligned - zone marked as used")
                     continue
                 
                 # Execute trade
@@ -366,11 +370,22 @@ class CoreBacktestEngine:
                 trade_result = self.execute_single_realistic_trade(zone, data, current_idx)
                 
                 if trade_result:
-                    used_zones.add(zone_id)
                     trades.append(trade_result)
                     break  # Exit zone loop after successful trade
         
         print(f"   ✅ Executed {len(trades)} realistic trades")
+        print(f"   📊 Zones used: {len(used_zones)}")
+        print(f"   ❌ Zones invalidated: {len(invalidated_zones)}")
+        
+        # Debug: Show which zones were filtered by trend
+        trend_filtered_count = 0
+        for zone_id in used_zones:
+            if zone_id not in [t.get('zone_id') for t in trades]:
+                trend_filtered_count += 1
+        
+        if trend_filtered_count > 0:
+            print(f"   ⚠️ Zones touched but trend-filtered: {trend_filtered_count}")
+        
         return trades
     
     def track_zone_validation_realtime(self, zone: Dict, data: pd.DataFrame, start_idx: int) -> Dict:
@@ -565,13 +580,13 @@ class CoreBacktestEngine:
         return self.simulate_realistic_outcome(
             entry_price, initial_stop, target_price, direction, 
             position_size, data, current_idx, zone['type'], stop_distance_pips, zone.get('pair', 'EURUSD'),
-            zone_high, zone_low
+            zone_high, zone_low, zone
         )
 
     def simulate_realistic_outcome(self, entry_price: float, stop_loss: float, target_price: float,
-                     direction: str, position_size: float, data: pd.DataFrame,
-                     entry_idx: int, zone_type: str, stop_distance_pips: float, pair: str, 
-                     zone_high: float = None, zone_low: float = None) -> Dict:
+                 direction: str, position_size: float, data: pd.DataFrame,
+                 entry_idx: int, zone_type: str, stop_distance_pips: float, pair: str, 
+                 zone_high: float = None, zone_low: float = None, zone: Dict = None) -> Dict:
         """
         Simulate REALISTIC trade outcome with proper 1R→breakeven management
         Clean production version - no debug output
@@ -664,7 +679,8 @@ class CoreBacktestEngine:
                         'breakeven_moved': breakeven_moved,
                         'trade_summary': trade_summary,
                         'zone_high': zone_high,
-                        'zone_low': zone_low
+                        'zone_low': zone_low,
+                        'zone_id': zone.get('zone_id', 'unknown') if zone else 'unknown'  # Add zone ID for tracking
                     }
                 # Check 2.5R target hit (wick-based)
                 elif exit_candle['high'] >= target_price:
