@@ -845,7 +845,6 @@ class CoreBacktestEngine:
             'avg_trade_duration': round(avg_duration_actual_days, 1),
             'avg_trade_duration_candles': round(avg_duration_candles, 1),
             'validation_method': 'walk_forward_realistic',
-            'leg_out_threshold': 2.5,
             'trades': trades
         }
     

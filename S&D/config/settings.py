@@ -113,8 +113,8 @@ RISK_CONFIG = {
         'round_to_level': False        # Round to psychological levels
     },
     'take_profit_rules': {
-        'risk_reward_ratio': 2.5,      # Minimum 1:25 RR
-        'scale_out_enabled': False,     # Take partial profits
+        'risk_reward_ratio': 2.0,      # Minimum 1:25 RR
+        'scale_out_enabled': True,     # Take partial profits
         'scale_levels': [1.0, 2.0, 3.0], # 1R, 2R, 3R exits
         'scale_percentages': [33, 33, 34] # % of position to close
     }
