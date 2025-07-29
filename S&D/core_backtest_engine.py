@@ -275,12 +275,16 @@ class CoreBacktestEngine:
     def execute_realistic_trades(self, patterns: List[Dict], data: pd.DataFrame,
                            trend_data: pd.DataFrame, timeframe: str, pair: str) -> List[Dict]:
         """
-        Execute trades with realistic zone activation and trade management
-        Zones must be left by price before becoming tradeable
+        CRITICAL FIX: Execute trades ONLY on validated zones
+        1. Zone forms
+        2. Price must hit 2.5x target (validation) 
+        3. Only THEN can we place limit orders for zone retest
+        4. If price penetrates 50% before validation = zone deleted forever
         """
         trades = []
         used_zones = set()
         invalidated_zones = set()
+        validated_zones = {}  # NEW: Track validation status and when it occurred
         
         # Get backtest start date (first 200 candles are for EMA warm-up)
         backtest_start_idx = 200
@@ -305,52 +309,54 @@ class CoreBacktestEngine:
         
         print(f"   🎯 Trading {len(valid_patterns)} zones formed during backtest")
         
-        # Build zone activation schedule
-        zone_activation_schedule = []
+        # CRITICAL FIX: Build zone validation tracking
+        zone_tracking = {}
         for pattern in valid_patterns:
             zone_end_idx = pattern['end_idx']
-            # Zone becomes active N candles after formation
-            activation_idx = zone_end_idx + 3
-            zone_activation_schedule.append({
-                'activation_idx': activation_idx,
+            zone_id = f"{pattern['type']}_{zone_end_idx}_{pattern['zone_low']:.5f}"
+            
+            # Track validation status for each zone
+            validation_status = self.track_zone_validation_realtime(
+                pattern, data, zone_end_idx + 1
+            )
+            
+            zone_tracking[zone_id] = {
                 'pattern': pattern,
-                'zone_id': f"{pattern['type']}_{zone_end_idx}_{pattern['zone_low']:.5f}"
-            })
+                'formation_idx': zone_end_idx,
+                'validated': validation_status['validated'],
+                'validation_idx': validation_status['validation_idx'],
+                'invalidated': validation_status['invalidated'],
+                'invalidation_idx': validation_status['invalidation_idx']
+            }
         
-        zone_activation_schedule.sort(key=lambda x: x['activation_idx'])
-        active_zones = []
-        activation_pointer = 0
-        
-        # Process each candle
+        # Process each candle with VALIDATION-FIRST logic
         for current_idx in range(backtest_start_idx, len(data)):
             current_candle = data.iloc[current_idx]
             
-            # Activate new zones that are ready
-            while (activation_pointer < len(zone_activation_schedule) and 
-                zone_activation_schedule[activation_pointer]['activation_idx'] <= current_idx):
-                zone_info = zone_activation_schedule[activation_pointer]
-                if zone_info['zone_id'] not in used_zones:
-                    active_zones.append(zone_info['pattern'])
-                activation_pointer += 1
-            
-            # Check active zones for trades
-            for zone in active_zones.copy():
-                zone_id = f"{zone['type']}_{zone.get('end_idx', 0)}_{zone['zone_low']:.5f}"
-                
+            # CRITICAL: Only consider zones that have been VALIDATED
+            for zone_id, zone_info in zone_tracking.items():
                 if zone_id in used_zones or zone_id in invalidated_zones:
-                    active_zones.remove(zone)
+                    continue
+                    
+                # Skip if not validated
+                if not zone_info['validated']:
+                    continue
+                    
+                # Skip if we haven't reached validation point yet
+                if zone_info['validation_idx'] is None or current_idx <= zone_info['validation_idx']:
                     continue
                 
-                # Check for zone invalidation (50% penetration)
-                if self.fast_wick_invalidation_check(zone, current_candle, zone_id, invalidated_zones):
-                    active_zones.remove(zone)
-                    continue
+                zone = zone_info['pattern']
                 
-                # Check if price interacts with zone
+                # FIRST: Check if price is anywhere near the zone
                 if not self.fast_zone_interaction_check(zone, current_candle):
                     continue
                 
-                # Check trend alignment
+                # SECOND: Check if price touches entry level (limit order logic)
+                if not self.check_limit_order_trigger(zone, current_candle):
+                    continue
+                
+                # THIRD: Check trend alignment
                 current_trend = trend_data['trend'].iloc[current_idx] if current_idx < len(trend_data) else 'bullish'
                 if not self.is_trend_aligned(zone['type'], current_trend):
                     continue
@@ -361,11 +367,73 @@ class CoreBacktestEngine:
                 
                 if trade_result:
                     used_zones.add(zone_id)
-                    active_zones.remove(zone)
                     trades.append(trade_result)
+                    break  # Exit zone loop after successful trade
         
         print(f"   ✅ Executed {len(trades)} realistic trades")
         return trades
+    
+    def track_zone_validation_realtime(self, zone: Dict, data: pd.DataFrame, start_idx: int) -> Dict:
+        """
+        CRITICAL: Track zone validation in real-time as price moves
+        Returns validation status and index where it occurred
+        """
+        zone_high = zone['zone_high']
+        zone_low = zone['zone_low']
+        zone_range = zone_high - zone_low
+        zone_type = zone['type']
+        
+        # Calculate targets
+        if zone_type in ['D-B-D', 'R-B-D']:  # Supply zones
+            validation_target = zone_low - (2.5 * zone_range)
+            invalidation_level = zone_low + (zone_range * 0.50)
+        else:  # Demand zones
+            validation_target = zone_high + (2.5 * zone_range)
+            invalidation_level = zone_high - (zone_range * 0.50)
+        
+        # Track price movement
+        for idx in range(start_idx, len(data)):
+            candle = data.iloc[idx]
+            
+            # Check validation first
+            if zone_type in ['D-B-D', 'R-B-D']:  # Supply
+                if candle['low'] <= validation_target:
+                    return {
+                        'validated': True,
+                        'validation_idx': idx,
+                        'invalidated': False,
+                        'invalidation_idx': None
+                    }
+                if candle['high'] >= invalidation_level:
+                    return {
+                        'validated': False,
+                        'validation_idx': None,
+                        'invalidated': True,
+                        'invalidation_idx': idx
+                    }
+            else:  # Demand
+                if candle['high'] >= validation_target:
+                    return {
+                        'validated': True,
+                        'validation_idx': idx,
+                        'invalidated': False,
+                        'invalidation_idx': None
+                    }
+                if candle['low'] <= invalidation_level:
+                    return {
+                        'validated': False,
+                        'validation_idx': None,
+                        'invalidated': True,
+                        'invalidation_idx': idx
+                    }
+        
+        # Neither validated nor invalidated
+        return {
+            'validated': False,
+            'validation_idx': None,
+            'invalidated': False,
+            'invalidation_idx': None
+        }
     
     def precalculate_invalidation_level(self, zone: Dict) -> float:
         """Pre-calculate WICK-based invalidation level (50% penetration) for performance"""
@@ -398,6 +466,24 @@ class CoreBacktestEngine:
                 return True
         
         return False
+    
+    def check_limit_order_trigger(self, zone: Dict, current_candle: pd.Series) -> bool:
+        """
+        Check if price triggers our limit order entry
+        """
+        zone_high = zone['zone_high']
+        zone_low = zone['zone_low']
+        zone_range = zone_high - zone_low
+        
+        # Calculate entry price
+        if zone['type'] in ['R-B-R', 'D-B-R']:  # Demand zones (buy)
+            entry_price = zone_high + (zone_range * 0.05)
+            # Buy limit triggers if high reaches entry
+            return current_candle['high'] >= entry_price
+        else:  # Supply zones (sell)
+            entry_price = zone_low - (zone_range * 0.05)
+            # Sell limit triggers if low reaches entry
+            return current_candle['low'] <= entry_price
     
     def fast_zone_interaction_check(self, zone: Dict, current_candle: pd.Series) -> bool:
         """OPTIMIZED: Fast zone interaction check - simple overlap test"""

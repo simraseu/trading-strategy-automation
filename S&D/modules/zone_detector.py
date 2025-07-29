@@ -657,7 +657,8 @@ class ZoneDetector:
 
     def validate_zone_2_5x_target(self, zone: Dict, data: pd.DataFrame) -> Dict:
         """
-        Monitor price action after zone formation to validate 2.5x target
+        CRITICAL: Monitor price action after zone formation to validate 2.5x target
+        A zone is ONLY tradeable if it hits 2.5x BEFORE any invalidation
         
         Args:
             zone: Zone dictionary with formation data
