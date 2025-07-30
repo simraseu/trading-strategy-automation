@@ -362,7 +362,6 @@ class CoreBacktestEngine:
                 # THIRD: Check trend alignment
                 current_trend = trend_data['trend'].iloc[current_idx] if current_idx < len(trend_data) else 'bullish'
                 if not self.is_trend_aligned(zone['type'], current_trend):
-                    print(f"   ⚠️ Zone {zone_id} entry touched but trend misaligned - zone marked as used")
                     continue
                 
                 # Execute trade
@@ -373,9 +372,6 @@ class CoreBacktestEngine:
                     trades.append(trade_result)
                     break  # Exit zone loop after successful trade
         
-        print(f"   ✅ Executed {len(trades)} realistic trades")
-        print(f"   📊 Zones used: {len(used_zones)}")
-        print(f"   ❌ Zones invalidated: {len(invalidated_zones)}")
         
         # Debug: Show which zones were filtered by trend
         trend_filtered_count = 0
