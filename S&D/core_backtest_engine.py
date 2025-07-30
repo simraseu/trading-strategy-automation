@@ -514,37 +514,97 @@ class CoreBacktestEngine:
             return zone_type in ['D-B-D', 'R-B-D']
         return False
 
+    def calculate_deep_retracement_entry(self, zone: Dict, data: pd.DataFrame, 
+                               zone_direction: str, use_frontrun: bool) -> float:
+        """
+        Calculate deep retracement entry based on base candle closes
+        This is the KEY optimization that dramatically improves performance
+        
+        Args:
+            zone: Zone dictionary with base candle information
+            data: Full OHLC data
+            zone_direction: 'demand' or 'supply'
+            use_frontrun: Whether to add 5% front-run buffer
+            
+        Returns:
+            Optimal entry price at deepest retracement point
+        """
+        try:
+            # Extract base candle indices
+            base_info = zone.get('base', {})
+            base_start_idx = base_info.get('start_idx')
+            base_end_idx = base_info.get('end_idx')
+            
+            if base_start_idx is None or base_end_idx is None:
+                # Fallback to zone boundary if base info missing
+                zone_high = zone['zone_high']
+                zone_low = zone['zone_low']
+                zone_range = zone_high - zone_low
+                
+                if zone_direction == 'demand':
+                    return zone_high + (zone_range * 0.05 if use_frontrun else 0)
+                else:
+                    return zone_low - (zone_range * 0.05 if use_frontrun else 0)
+            
+            # Get base candles data
+            base_data = data.iloc[base_start_idx:base_end_idx+1]
+            zone_range = zone['zone_high'] - zone['zone_low']
+            
+            if zone_direction == 'demand':
+                # Demand: Find highest close in base (deepest retracement point)
+                highest_base_close = base_data['close'].max()
+                if use_frontrun:
+                    return highest_base_close + (zone_range * 0.05)
+                else:
+                    return highest_base_close
+            else:
+                # Supply: Find lowest close in base (deepest retracement point)
+                lowest_base_close = base_data['close'].min()
+                if use_frontrun:
+                    return lowest_base_close - (zone_range * 0.05)
+                else:
+                    return lowest_base_close
+                    
+        except Exception as e:
+            print(f"   ⚠️  Deep retracement calculation error: {str(e)}")
+            # Fallback to zone boundary
+            zone_high = zone['zone_high']
+            zone_low = zone['zone_low']
+            zone_range = zone_high - zone_low
+            
+            if zone_direction == 'demand':
+                return zone_high + (zone_range * 0.05 if use_frontrun else 0)
+            else:
+                return zone_low - (zone_range * 0.05 if use_frontrun else 0)
     def execute_single_realistic_trade(self, zone: Dict, data: pd.DataFrame, current_idx: int) -> Optional[Dict]:
         """
-        Execute single trade using REALISTIC 1R→2.5R management
-        Entry triggers when price touches the entry level (like a limit order)
+        Execute single trade using DEEP RETRACEMENT entries with 1R→2.5R management
+        Entry triggers at deepest base close + 5% front-run (optimal retracement point)
         """
         zone_high = zone['zone_high']
         zone_low = zone['zone_low']
         zone_range = zone_high - zone_low
         
-        # Entry and stop logic - Front-run beyond zone boundaries
+        # UPDATED: Deep retracement entry calculation
         if zone['type'] in ['R-B-R', 'D-B-R']:  # Demand zones (buy)
-            entry_price = zone_high + (zone_range * 0.05)  # 5% above zone
+            entry_price = self.calculate_deep_retracement_entry(zone, data, 'demand', True)
             direction = 'BUY'
             initial_stop = zone_low - (zone_range * 0.33)  # 33% buffer below zone
         elif zone['type'] in ['D-B-D', 'R-B-D']:  # Supply zones (sell)
-            entry_price = zone_low - (zone_range * 0.05)  # 5% below zone
+            entry_price = self.calculate_deep_retracement_entry(zone, data, 'supply', True)
             direction = 'SELL'
             initial_stop = zone_high + (zone_range * 0.33)  # 33% buffer above zone
         else:
             return None
         
-        # Check if current candle can trigger entry (like a limit order)
+        # Check if current candle can trigger entry (limit order logic)
         current_candle = data.iloc[current_idx]
         
         can_enter = False
         if direction == 'BUY':
-            # Buy limit order triggers if high touches or exceeds entry price
             if current_candle['high'] >= entry_price:
                 can_enter = True
         elif direction == 'SELL':
-            # Sell limit order triggers if low touches or falls below entry price
             if current_candle['low'] <= entry_price:
                 can_enter = True
         

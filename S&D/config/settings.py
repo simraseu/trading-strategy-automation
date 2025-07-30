@@ -90,7 +90,7 @@ TREND_CONFIG = {
     ]
 }
 
-# RISK MANAGEMENT CONFIGURATION - MODULE 4
+# RISK MANAGEMENT CONFIGURATION - MODULE 4 (UPDATED FOR DEEP RETRACEMENT)
 RISK_CONFIG = {
     'account_settings': {
         'starting_balance': 10000,      # $10,000 account
@@ -113,10 +113,15 @@ RISK_CONFIG = {
         'round_to_level': False        # Round to psychological levels
     },
     'take_profit_rules': {
-        'risk_reward_ratio': 2.0,      # Minimum 1:25 RR
+        'risk_reward_ratio': 2.5,      # Updated to 1:2.5 RR (matches your results)
         'scale_out_enabled': True,     # Take partial profits
-        'scale_levels': [1.0, 2.0, 3.0], # 1R, 2R, 3R exits
-        'scale_percentages': [33, 33, 34] # % of position to close
+        'scale_levels': [1.0, 2.5],    # 1R break-even, 2.5R final target
+        'scale_percentages': [0, 100]  # 0% at 1R (move to BE), 100% at 2.5R
+    },
+    'entry_method': {
+        'type': 'deep_retracement',    # NEW: Deep retracement entry method
+        'use_base_closes': True,       # Use base candle closes for entries
+        'front_run_percent': 0.05      # 5% front-run from base closes
     }
 }
 

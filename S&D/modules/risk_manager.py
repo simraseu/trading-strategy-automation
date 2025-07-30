@@ -84,13 +84,13 @@ class RiskManager:
             return False, f"Error checking zone testing: {str(e)}"
         
     def validate_zone_for_trading(self, zone: Dict, current_price: float, 
-                         pair: str = 'EURUSD', data: pd.DataFrame = None) -> Dict:
+                     pair: str = 'EURUSD', data: pd.DataFrame = None) -> Dict:
         """
         FIXED: Increase distance tolerance for historical backtesting
         """
         try:
-            # Calculate entry and stop using manual methods
-            entry_price = self.calculate_entry_price_manual(zone)
+            # Calculate entry and stop using deep retracement method
+            entry_price = self.calculate_entry_price_manual(zone, data)
             stop_loss_price = self.calculate_stop_loss_manual(zone)
             
             # Calculate stop distance from your entry (not current price)
@@ -138,27 +138,45 @@ class RiskManager:
                 'reason': f"Validation error: {str(e)}"
             }
 
-    def calculate_entry_price_manual(self, zone: Dict) -> float:
+    def calculate_entry_price_manual(self, zone: Dict, data: pd.DataFrame = None) -> float:
         """
-        Your 5% front-running entry method using CORRECT zone logic
+        UPDATED: Deep retracement entry method using base candle closes
         
         Args:
-            zone: Zone dictionary
+            zone: Zone dictionary with base candle information
+            data: OHLC data (optional, for base close calculation)
             
         Returns:
-            Entry price with 5% front-running from proper zone boundary
+            Entry price at deepest retracement point + 5% front-run
         """
-        zone_size = zone['zone_high'] - zone['zone_low']
-        front_run_distance = zone_size * 0.05  # 5% of zone size
+        if data is not None:
+            # Use deep retracement calculation if data available
+            try:
+                base_info = zone.get('base', {})
+                base_start_idx = base_info.get('start_idx')
+                base_end_idx = base_info.get('end_idx')
+                
+                if base_start_idx is not None and base_end_idx is not None:
+                    base_data = data.iloc[base_start_idx:base_end_idx+1]
+                    zone_size = zone['zone_high'] - zone['zone_low']
+                    front_run_distance = zone_size * 0.05
+                    
+                    if zone['type'] in ['R-B-R', 'D-B-R']:  # Demand zones
+                        highest_base_close = base_data['close'].max()
+                        return highest_base_close + front_run_distance
+                    else:  # Supply zones
+                        lowest_base_close = base_data['close'].min()
+                        return lowest_base_close - front_run_distance
+            except Exception:
+                pass  # Fall back to zone boundary method
         
-        if zone['type'] == 'R-B-R':  # Bullish demand zone
-            # Entry 5% above the HIGHEST CLOSE/OPEN boundary
-            # Since zone detection already calculated the proper boundary, use zone_high
+        # Fallback to original zone boundary method
+        zone_size = zone['zone_high'] - zone['zone_low']
+        front_run_distance = zone_size * 0.05
+        
+        if zone['type'] in ['R-B-R', 'D-B-R']:  # Demand zones
             entry_price = zone['zone_high'] + front_run_distance
-            
-        else:  # D-B-D bearish supply zone
-            # Entry 5% below the LOWEST CLOSE/OPEN boundary  
-            # Since zone detection already calculated the proper boundary, use zone_low
+        else:  # Supply zones
             entry_price = zone['zone_low'] - front_run_distance
         
         return entry_price
