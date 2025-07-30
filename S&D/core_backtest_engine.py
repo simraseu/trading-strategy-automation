@@ -589,11 +589,15 @@ class CoreBacktestEngine:
         if zone['type'] in ['R-B-R', 'D-B-R']:  # Demand zones (buy)
             entry_price = self.calculate_deep_retracement_entry(zone, data, 'demand', True)
             direction = 'BUY'
-            initial_stop = zone_low - (zone_range * 0.33)  # 33% buffer below zone
+            # CORRECTED: Stop based on entry-to-zone distance + 33% buffer
+            entry_to_zone_distance = abs(entry_price - zone_high)
+            initial_stop = zone_low - (entry_to_zone_distance * 0.33)
         elif zone['type'] in ['D-B-D', 'R-B-D']:  # Supply zones (sell)
             entry_price = self.calculate_deep_retracement_entry(zone, data, 'supply', True)
             direction = 'SELL'
-            initial_stop = zone_high + (zone_range * 0.33)  # 33% buffer above zone
+            # CORRECTED: Stop based on entry-to-zone distance + 33% buffer
+            entry_to_zone_distance = abs(zone_low - entry_price)
+            initial_stop = zone_high + (entry_to_zone_distance * 0.33)
         else:
             return None
         
