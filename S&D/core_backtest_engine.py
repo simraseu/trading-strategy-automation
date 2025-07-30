@@ -21,13 +21,17 @@ import warnings
 import glob
 warnings.filterwarnings('ignore')
 
-# Import your 100% updated modules
-from modules.data_loader import DataLoader
-from modules.candle_classifier import CandleClassifier
-from modules.zone_detector import ZoneDetector
-from modules.trend_classifier import TrendClassifier
-from modules.risk_manager import RiskManager
-from config.settings import ZONE_CONFIG, TREND_CONFIG, RISK_CONFIG
+try:
+    from modules.data_loader import DataLoader
+    from modules.candle_classifier import CandleClassifier
+    from modules.zone_detector import ZoneDetector
+    from modules.trend_classifier import TrendClassifier
+    from modules.risk_manager import RiskManager
+    from config.settings import ZONE_CONFIG, TREND_CONFIG, RISK_CONFIG
+except ImportError as e:
+    print(f"❌ Import error: {e}")
+    print("Make sure you're running from the S&D directory")
+    sys.exit(1)
 
 # Set process priority for maximum CPU usage
 try:
@@ -223,8 +227,9 @@ class CoreBacktestEngine:
             zone_detector = ZoneDetector(candle_classifier)
             patterns = zone_detector.detect_all_patterns(classified_data)
             
+            # Keep trend classifier for potential future use, but don't use in trading logic
             trend_classifier = TrendClassifier(data)
-            trend_data = trend_classifier.classify_trend_with_filter()
+            trend_data = trend_classifier.classify_trend_with_filter()  # Calculate but don't use
             
             risk_manager = RiskManager(account_balance=10000)
             
@@ -239,14 +244,14 @@ class CoreBacktestEngine:
             return self.create_empty_result(pair, timeframe, f"Error: {str(e)}")
     
     def execute_backtest_with_updated_logic(self, data: pd.DataFrame, patterns: Dict,
-                                          trend_data: pd.DataFrame, risk_manager: RiskManager,
-                                          pair: str, timeframe: str) -> Dict:
+                                      trend_data: pd.DataFrame, risk_manager: RiskManager,
+                                      pair: str, timeframe: str) -> Dict:
         """
-        Execute backtest using UPDATED ZONE_CONFIG and REALISTIC TRADE LOGIC
+        Execute backtest using UPDATED ZONE_CONFIG and REALISTIC TRADE LOGIC (NO EMA FILTER)
         """
         # Get all patterns (momentum + reversal)
         all_patterns = (patterns['dbd_patterns'] + patterns['rbr_patterns'] + 
-                       patterns.get('dbr_patterns', []) + patterns.get('rbd_patterns', []))
+                    patterns.get('dbr_patterns', []) + patterns.get('rbd_patterns', []))
         
         print(f"   📊 Found {len(all_patterns)} total patterns")
         
@@ -266,14 +271,14 @@ class CoreBacktestEngine:
         print(f"   🎯 {len(valid_patterns)} zones available for trading from {len(all_patterns)} total")
         
         
-        # Execute trades with REALISTIC LOGIC
-        trades = self.execute_realistic_trades(valid_patterns, data, trend_data, timeframe, pair)
+        # Execute trades with REALISTIC LOGIC (NO TREND FILTER)
+        trades = self.execute_realistic_trades_no_filter(valid_patterns, data, timeframe, pair)
         
         # Calculate performance
         return self.calculate_performance_metrics(trades, pair, timeframe)
     
-    def execute_realistic_trades(self, patterns: List[Dict], data: pd.DataFrame,
-                           trend_data: pd.DataFrame, timeframe: str, pair: str) -> List[Dict]:
+    def execute_realistic_trades_no_filter(self, patterns: List[Dict], data: pd.DataFrame,
+                                     timeframe: str, pair: str) -> List[Dict]:
         """
         CRITICAL FIX: Execute trades ONLY on validated zones
         1. Zone forms
@@ -359,12 +364,7 @@ class CoreBacktestEngine:
                 # CRITICAL FIX: Mark zone as used when entry is touched
                 used_zones.add(zone_id)  # Zone is used regardless of filters
                 
-                # THIRD: Check trend alignment
-                current_trend = trend_data['trend'].iloc[current_idx] if current_idx < len(trend_data) else 'bullish'
-                if not self.is_trend_aligned(zone['type'], current_trend):
-                    continue
-                
-                # Execute trade
+                # NO TREND FILTER - Execute all zones that touch entry
                 zone['pair'] = pair
                 trade_result = self.execute_single_realistic_trade(zone, data, current_idx)
                 
@@ -864,11 +864,11 @@ class CoreBacktestEngine:
             'H1': 0.04
         }
         
-        # Basic metrics
+        # Basic metrics - CORRECTED: Mutually exclusive categories
         total_trades = len(trades)
-        winning_trades = len([t for t in trades if t['pnl'] > 0])
+        winning_trades = len([t for t in trades if t.get('result') == 'WIN'])
         breakeven_trades = len([t for t in trades if t.get('result') == 'BREAKEVEN'])
-        losing_trades = len([t for t in trades if t['pnl'] < 0])
+        losing_trades = len([t for t in trades if t.get('result') == 'LOSS'])
         win_rate = (winning_trades / total_trades) * 100 if total_trades > 0 else 0
         loss_rate = (losing_trades / total_trades) * 100 if total_trades > 0 else 0
         be_rate = (breakeven_trades / total_trades) * 100 if total_trades > 0 else 0

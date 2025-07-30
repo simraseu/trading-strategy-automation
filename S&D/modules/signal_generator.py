@@ -79,10 +79,10 @@ class SignalGenerator:
             print(f"   Current trend: {current_trend.upper()}")
             print(f"   Trend strength: {trend_strength:.3f}")
             
-            # Step 3: Filter zones by trend alignment
-            print("🎯 Step 3: Filtering by trend alignment...")
+            # Step 3: No trend filtering - use all zones
+            print("🎯 Step 3: No trend filtering applied...")
             aligned_zones = self.filter_zones_by_trend(zones, current_trend)
-            print(f"   Trend-aligned zones: {len(aligned_zones)}")
+            print(f"   Available zones: {len(aligned_zones)}")
             
             # Step 4: Risk validation (CRITICAL FILTER)
             print("🛡️  Step 4: Risk validation...")
@@ -114,63 +114,42 @@ class SignalGenerator:
     
     def filter_zones_by_trend(self, zones: Dict, current_trend: str) -> List[Dict]:
         """
-        SIMPLIFIED: Filter zones based on EMA50 vs EMA200 only
-        MA50 > MA200 = Only longs (R-B-R, D-B-R)  
-        MA50 < MA200 = Only shorts (D-B-D, R-B-D)
+        NO TREND FILTER: Return all zones regardless of trend direction
         
         Args:
             zones: Dictionary with zone patterns
-            current_trend: Current trend classification (unused - we check EMAs directly)
+            current_trend: Current trend classification (unused)
             
         Returns:
-            List of trend-aligned zones
+            List of all zones (no filtering)
         """
-        aligned_zones = []
-        
-        # Get current EMA values directly from trend classifier
-        trend_data = self.trend_classifier.classify_trend_with_filter()
-        current_ema50 = trend_data['ema_50'].iloc[-1]
-        current_ema200 = trend_data['ema_200'].iloc[-1]
-        
-        # SIMPLE TREND DETERMINATION
-        if current_ema50 > current_ema200:
-            trend_direction = "BULLISH"
-            allowed_patterns = ['R-B-R', 'D-B-R']  # Only long patterns
-        else:
-            trend_direction = "BEARISH" 
-            allowed_patterns = ['D-B-D', 'R-B-D']  # Only short patterns
-        
-        print(f"   SIMPLE TREND: EMA50={current_ema50:.5f}, EMA200={current_ema200:.5f}")
-        print(f"   DIRECTION: {trend_direction} - Allowing: {', '.join(allowed_patterns)}")
-        
         # Get all zone types including reversals
         all_zones = (zones['dbd_patterns'] + zones['rbr_patterns'] + 
                     zones.get('dbr_patterns', []) + zones.get('rbd_patterns', []))
         
-        # Filter zones by simple trend rule
+        print(f"   NO TREND FILTER: Using all {len(all_zones)} zones")
+        
+        # Return all zones without filtering
         for zone in all_zones:
             zone_type = zone['type']
             
-            if zone_type in allowed_patterns:
-                aligned_zones.append(zone)
-                
-                # Calculate zone age for debugging
-                if hasattr(self, 'data') and self.data is not None:
-                    try:
-                        # More robust date handling
-                        if zone['end_idx'] < len(self.data):
-                            zone_end_idx = zone['end_idx']
-                            current_idx = len(self.data) - 1
-                            candles_ago = current_idx - zone_end_idx
-                            print(f"   KEPT: {zone_type} zone ({candles_ago} candles ago)")
-                        else:
-                            print(f"   KEPT: {zone_type} zone (recent formation)")
-                    except Exception:
-                        print(f"   KEPT: {zone_type} zone")
+            # Calculate zone age for debugging
+            if hasattr(self, 'data') and self.data is not None:
+                try:
+                    # More robust date handling
+                    if zone['end_idx'] < len(self.data):
+                        zone_end_idx = zone['end_idx']
+                        current_idx = len(self.data) - 1
+                        candles_ago = current_idx - zone_end_idx
+                        print(f"   KEPT: {zone_type} zone ({candles_ago} candles ago)")
+                    else:
+                        print(f"   KEPT: {zone_type} zone (recent formation)")
+                except Exception:
+                    print(f"   KEPT: {zone_type} zone")
         
-        print(f"   RESULT: {len(aligned_zones)} zones align with {trend_direction} trend")
+        print(f"   RESULT: {len(all_zones)} zones available (no trend filtering)")
         
-        return aligned_zones
+        return all_zones
     
     def create_signal(self, zone: Dict, risk_data: Dict, trend_data: pd.DataFrame, 
                  pair: str, zone_timeframe: str) -> Dict:
