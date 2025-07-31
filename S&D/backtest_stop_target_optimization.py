@@ -1127,8 +1127,50 @@ class StopTargetOptimizationEngine(CoreBacktestEngine):
                 summary_df.to_excel(writer, sheet_name='All_Combinations', index=False)
                 print("   ✅ Sheet 1: All Combinations Summary")
                 
+                # SHEET 2: ALL TRADES FOR MANUAL CHART VALIDATION
+                print("   🔄 Collecting all trades for manual validation...")
+                all_trades_for_validation = []
+                trade_counter = 1
+                
+                for result in results:
+                    if result['total_trades'] > 0 and 'trades' in result:
+                        for trade in result['trades']:
+                            all_trades_for_validation.append({
+                                'Trade_Number': trade_counter,
+                                'Combination': result['combination'],
+                                'Zone_Type': trade['zone_type'],
+                                'Direction': trade['direction'],
+                                'Entry_Date': trade['entry_date'].strftime('%Y-%m-%d') if hasattr(trade['entry_date'], 'strftime') else str(trade['entry_date']),
+                                'Exit_Date': trade['exit_date'].strftime('%Y-%m-%d') if hasattr(trade['exit_date'], 'strftime') else str(trade['exit_date']),
+                                'Entry_Price': f"{trade['entry_price']:.6f}",
+                                'Exit_Price': f"{trade['exit_price']:.6f}",
+                                'Zone_High': f"{trade.get('zone_high', 0):.6f}",
+                                'Zone_Low': f"{trade.get('zone_low', 0):.6f}",
+                                'Target_Price': f"{trade.get('target_price', 0):.6f}",
+                                'Initial_Stop': f"{trade.get('initial_stop', 0):.6f}",
+                                'Duration': trade['duration_days'],
+                                'Result': trade['result'],
+                                'Pips': f"{trade['pips']:+.1f}",
+                                'PnL': f"${trade['pnl']:.2f}",
+                                'Position_Size': f"{trade['position_size']:.4f}",
+                                'Commission_Cost': f"${trade['commission_cost']:.2f}",
+                                'Breakeven_Moved': 'Yes' if trade['breakeven_moved'] else 'No',
+                                'Stop_Buffer': f"{result.get('stop_buffer', 0)*100:.0f}%",
+                                'Target_Multiplier': f"{result.get('target_multiplier', 0):.1f}R"
+                            })
+                            trade_counter += 1
+                
+                if all_trades_for_validation:
+                    trades_validation_df = pd.DataFrame(all_trades_for_validation)
+                    trades_validation_df.to_excel(writer, sheet_name='All_Trades_Chart_Validation', index=False)
+                    print(f"   ✅ Sheet 2: All Trades for Chart Validation ({len(all_trades_for_validation)} trades)")
+                else:
+                    empty_df = pd.DataFrame({'Note': ['No trades found across all combinations']})
+                    empty_df.to_excel(writer, sheet_name='All_Trades_Chart_Validation', index=False)
+                    print("   ⚠️  Sheet 2: No trades found for validation")
+                
                 if len(successful_df) > 0:
-                    # SHEET 2: Performance Rankings
+                    # SHEET 3: Performance Rankings
                     rankings_data = []
                     
                     # Top 5 by Profit Factor
@@ -1165,9 +1207,9 @@ class StopTargetOptimizationEngine(CoreBacktestEngine):
                     
                     rankings_df = pd.DataFrame(rankings_data, columns=['Col_1', 'Col_2', 'Col_3', 'Col_4', 'Col_5'])
                     rankings_df.to_excel(writer, sheet_name='Performance_Rankings', index=False)
-                    print("   ✅ Sheet 2: Performance Rankings")
+                    print("   ✅ Sheet 3: Performance Rankings")
                     
-                    # SHEET 3: Stop Buffer Analysis
+                    # SHEET 4: Stop Buffer Analysis
                     if 'stop_key' in successful_df.columns:
                         stop_analysis = successful_df.groupby('stop_key').agg({
                             'profit_factor': ['mean', 'std', 'count'],
@@ -1180,9 +1222,9 @@ class StopTargetOptimizationEngine(CoreBacktestEngine):
                                             'Total_Trades', 'Avg_Return', 'StdDev_Return']
                         stop_analysis = stop_analysis.reset_index()
                         stop_analysis.to_excel(writer, sheet_name='Stop_Buffer_Analysis', index=False)
-                        print("   ✅ Sheet 3: Stop Buffer Analysis")
+                        print("   ✅ Sheet 4: Stop Buffer Analysis")
                     
-                    # SHEET 4: Target Analysis
+                    # SHEET 5: Target Analysis
                     if 'target_key' in successful_df.columns:
                         target_analysis = successful_df.groupby('target_key').agg({
                             'profit_factor': ['mean', 'std', 'count'],
@@ -1195,9 +1237,9 @@ class StopTargetOptimizationEngine(CoreBacktestEngine):
                                                 'Total_Trades', 'Avg_Return', 'StdDev_Return']
                         target_analysis = target_analysis.reset_index()
                         target_analysis.to_excel(writer, sheet_name='Target_Analysis', index=False)
-                        print("   ✅ Sheet 4: Target Analysis")
+                        print("   ✅ Sheet 5: Target Analysis")
                     
-                    # SHEET 5: Detailed Trade Analysis (for best combination)
+                    # SHEET 6: Best Combination Trade Details
                     best_combo = successful_df.loc[successful_df['profit_factor'].idxmax()]
                     if 'trades' in best_combo and best_combo['trades']:
                         trade_details = []
@@ -1221,7 +1263,7 @@ class StopTargetOptimizationEngine(CoreBacktestEngine):
                         
                         trades_df = pd.DataFrame(trade_details)
                         trades_df.to_excel(writer, sheet_name='Best_Combo_Trades', index=False)
-                        print(f"   ✅ Sheet 5: Best Combination Trade Details ({best_combo['combination']})")
+                        print(f"   ✅ Sheet 6: Best Combination Trade Details ({best_combo['combination']})")
                 
                 else:
                     # No successful combinations
@@ -1233,7 +1275,8 @@ class StopTargetOptimizationEngine(CoreBacktestEngine):
             print(f"\n📁 SINGLE PAIR OPTIMIZATION REPORT SAVED:")
             print(f"   File: {filename}")
             print(f"   📊 Comprehensive parameter optimization analysis")
-            print(f"   🎯 Ready for stop/target parameter selection")
+            print(f"   🎯 ALL TRADES included for manual chart validation in Sheet 2")
+            print(f"   📈 Use Sheet 2 to verify each trade against your TradingView charts")
             
         except Exception as e:
             print(f"❌ Error creating single pair optimization report: {str(e)}")

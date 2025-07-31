@@ -685,27 +685,118 @@ class CoreBacktestEngine:
         else:
             return None
         
-        # Look ahead for exit with proper trade management
-        for exit_idx in range(entry_idx + 1, min(entry_idx + 50, len(data))):  # Limit to 50 candles
+        # Look ahead for exit with proper trade management - START FROM ENTRY CANDLE
+        for exit_idx in range(entry_idx, min(entry_idx + 50, len(data))):  # FIXED: Include entry candle
             exit_candle = data.iloc[exit_idx]
             
+            # SAME-CANDLE LOGIC: On entry candle, ONLY check stop-loss (no 1R or TP possible)
+            if exit_idx == entry_idx:
+                # Same-candle stop-loss check only
+                if direction == 'BUY':
+                    if exit_candle['low'] <= current_stop:
+                        # Same-candle stop hit
+                        price_diff = current_stop - entry_price
+                        pips_moved = price_diff / pip_value
+                        gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
+                        total_commission = commission_per_lot * proper_position_size * 2
+                        net_pnl = gross_pnl - total_commission
+                        
+                        trade_summary = f"{zone_type} zone - Same-candle stop hit - Entry: {entry_price:.6f}, Stop: {current_stop:.6f}, Duration: 0 candles, Result: {pips_moved:+.0f} pips = ${net_pnl:.0f}"
+                        
+                        return {
+                            'zone_type': zone_type,
+                            'direction': direction,
+                            'entry_price': entry_price,
+                            'entry_date': data.index[entry_idx],
+                            'exit_price': current_stop,
+                            'exit_date': data.index[exit_idx],
+                            'result': 'LOSS',
+                            'pnl': round(net_pnl, 2),
+                            'duration_days': 0,
+                            'position_size': proper_position_size,
+                            'pips': round(pips_moved, 1),
+                            'commission_cost': total_commission,
+                            'breakeven_moved': False,
+                            'trade_summary': trade_summary,
+                            'zone_high': zone_high,
+                            'zone_low': zone_low,
+                            'zone_id': zone.get('zone_id', 'unknown') if zone else 'unknown'
+                        }
+                else:  # SELL
+                    if exit_candle['high'] >= current_stop:
+                        # Same-candle stop hit
+                        price_diff = entry_price - current_stop
+                        pips_moved = price_diff / pip_value
+                        gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
+                        total_commission = commission_per_lot * proper_position_size * 2
+                        net_pnl = gross_pnl - total_commission
+                        
+                        trade_summary = f"{zone_type} zone - Same-candle stop hit - Entry: {entry_price:.6f}, Stop: {current_stop:.6f}, Duration: 0 candles, Result: {pips_moved:+.0f} pips = ${net_pnl:.0f}"
+                        
+                        return {
+                            'zone_type': zone_type,
+                            'direction': direction,
+                            'entry_price': entry_price,
+                            'entry_date': data.index[entry_idx],
+                            'exit_price': current_stop,
+                            'exit_date': data.index[exit_idx],
+                            'result': 'LOSS',
+                            'pnl': round(net_pnl, 2),
+                            'duration_days': 0,
+                            'position_size': proper_position_size,
+                            'pips': round(pips_moved, 1),
+                            'commission_cost': total_commission,
+                            'breakeven_moved': False,
+                            'trade_summary': trade_summary,
+                            'zone_high': zone_high,
+                            'zone_low': zone_low
+                        }
+                
+                # If no same-candle stop hit, continue to next candle
+                continue
+            
+            # SUBSEQUENT CANDLES: Full trade management (1R, breakeven, TP)
             # Calculate 1R target for break-even trigger
             one_r_target = entry_price + risk_distance if direction == 'BUY' else entry_price - risk_distance
 
-            # Check for 1R hit FIRST (wick-based) - triggers break-even move
-            if not breakeven_moved:
-                if direction == 'BUY' and exit_candle['high'] >= one_r_target:
-                    current_stop = entry_price  # Move stop to EXACT entry price
-                    breakeven_moved = True
-                elif direction == 'SELL' and exit_candle['low'] <= one_r_target:
-                    current_stop = entry_price  # Move stop to EXACT entry price
-                    breakeven_moved = True
-
-            # Check stops and targets with WICK-BASED exits
+            # Check for 1R hit AND TP hit on same candle - TP takes priority
             if direction == 'BUY':
-                # Check stop loss hit (wick-based)
+                # Check TP FIRST (higher priority than 1R breakeven trigger)
+                if exit_candle['high'] >= target_price:
+                    price_diff = target_price - entry_price
+                    pips_moved = price_diff / pip_value
+                    gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
+                    total_commission = commission_per_lot * proper_position_size * 2
+                    net_pnl = gross_pnl - total_commission
+                    
+                    trade_summary = f"{zone_type} zone - Zone High: {stop_loss + risk_distance:.6f}, Zone Low: {stop_loss:.6f}, Entry: {entry_price:.6f}, Stop: {stop_loss:.6f}, Duration: {exit_idx - entry_idx} candles, Result: {pips_moved:+.0f} pips = ${net_pnl:.0f}"
+                    
+                    return {
+                        'zone_type': zone_type,
+                        'direction': direction,
+                        'entry_price': entry_price,
+                        'entry_date': data.index[entry_idx],
+                        'exit_price': target_price,
+                        'exit_date': data.index[exit_idx],
+                        'result': 'WIN',
+                        'pnl': round(net_pnl, 2),
+                        'duration_days': exit_idx - entry_idx,
+                        'position_size': proper_position_size,
+                        'pips': round(pips_moved, 1),
+                        'commission_cost': total_commission,
+                        'breakeven_moved': breakeven_moved,
+                        'trade_summary': trade_summary,
+                        'zone_high': zone_high,
+                        'zone_low': zone_low
+                    }
+                
+                # Then check 1R for breakeven trigger (only if TP not hit)
+                if not breakeven_moved and exit_candle['high'] >= one_r_target:
+                    current_stop = entry_price  # Move stop to EXACT entry price
+                    breakeven_moved = True
+                
+                # Finally check stop loss hit
                 if exit_candle['low'] <= current_stop:
-                    # Calculate P&L from actual exit price
                     price_diff = current_stop - entry_price
                     pips_moved = price_diff / pip_value
                     gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
@@ -714,13 +805,12 @@ class CoreBacktestEngine:
                     
                     # Classify result based on break-even status
                     if breakeven_moved and current_stop == entry_price:
-                        result_type = 'BREAKEVEN'  # Exact break-even
+                        result_type = 'BREAKEVEN'
                     elif net_pnl < 0:
                         result_type = 'LOSS'
                     else:
                         result_type = 'WIN'
                     
-                    # Create detailed trade summary
                     trade_summary = f"{zone_type} zone - Zone High: {stop_loss + risk_distance:.6f}, Zone Low: {stop_loss:.6f}, Entry: {entry_price:.6f}, Stop: {stop_loss:.6f}, Duration: {exit_idx - entry_idx} candles, Result: {pips_moved:+.0f} pips = ${net_pnl:.0f}"
                     
                     return {
@@ -740,18 +830,18 @@ class CoreBacktestEngine:
                         'trade_summary': trade_summary,
                         'zone_high': zone_high,
                         'zone_low': zone_low,
-                        'zone_id': zone.get('zone_id', 'unknown') if zone else 'unknown'  # Add zone ID for tracking
+                        'zone_id': zone.get('zone_id', 'unknown') if zone else 'unknown'
                     }
-                # Check 2.5R target hit (wick-based)
-                elif exit_candle['high'] >= target_price:
-                    price_diff = target_price - entry_price
+            else:  # SELL - TP priority, then breakeven trigger, then stop
+                # Check TP FIRST (higher priority than 1R breakeven trigger)
+                if exit_candle['low'] <= target_price:
+                    price_diff = entry_price - target_price
                     pips_moved = price_diff / pip_value
                     gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
                     total_commission = commission_per_lot * proper_position_size * 2
                     net_pnl = gross_pnl - total_commission
                     
-                    # Create detailed trade summary
-                    trade_summary = f"{zone_type} zone - Zone High: {stop_loss + risk_distance:.6f}, Zone Low: {stop_loss:.6f}, Entry: {entry_price:.6f}, Stop: {stop_loss:.6f}, Duration: {exit_idx - entry_idx} candles, Result: {pips_moved:+.0f} pips = ${net_pnl:.0f}"
+                    trade_summary = f"{zone_type} zone - Zone High: {stop_loss:.6f}, Zone Low: {stop_loss - risk_distance:.6f}, Entry: {entry_price:.6f}, Stop: {stop_loss:.6f}, Duration: {exit_idx - entry_idx} candles, Result: {pips_moved:+.0f} pips = ${net_pnl:.0f}"
                     
                     return {
                         'zone_type': zone_type,
@@ -771,8 +861,13 @@ class CoreBacktestEngine:
                         'zone_high': zone_high,
                         'zone_low': zone_low
                     }
-            else:  # SELL - Wick-based exits with exact break-even
-                # Check stop loss hit (wick-based)
+                
+                # Then check 1R for breakeven trigger (only if TP not hit)
+                if not breakeven_moved and exit_candle['low'] <= one_r_target:
+                    current_stop = entry_price  # Move stop to EXACT entry price
+                    breakeven_moved = True
+                
+                # Finally check stop loss hit
                 if exit_candle['high'] >= current_stop:
                     price_diff = entry_price - current_stop
                     pips_moved = price_diff / pip_value
@@ -782,13 +877,12 @@ class CoreBacktestEngine:
                     
                     # Classify result based on break-even status
                     if breakeven_moved and current_stop == entry_price:
-                        result_type = 'BREAKEVEN'  # Exact break-even
+                        result_type = 'BREAKEVEN'
                     elif net_pnl < 0:
                         result_type = 'LOSS'
                     else:
                         result_type = 'WIN'
                     
-                    # Create detailed trade summary
                     trade_summary = f"{zone_type} zone - Zone High: {stop_loss:.6f}, Zone Low: {stop_loss - risk_distance:.6f}, Entry: {entry_price:.6f}, Stop: {stop_loss:.6f}, Duration: {exit_idx - entry_idx} candles, Result: {pips_moved:+.0f} pips = ${net_pnl:.0f}"
                     
                     return {
@@ -799,35 +893,6 @@ class CoreBacktestEngine:
                         'exit_price': current_stop,
                         'exit_date': data.index[exit_idx],
                         'result': result_type,
-                        'pnl': round(net_pnl, 2),
-                        'duration_days': exit_idx - entry_idx,
-                        'position_size': proper_position_size,
-                        'pips': round(pips_moved, 1),
-                        'commission_cost': total_commission,
-                        'breakeven_moved': breakeven_moved,
-                        'trade_summary': trade_summary,
-                        'zone_high': zone_high,
-                        'zone_low': zone_low
-                    }
-                # Check 2.5R target hit (wick-based)
-                elif exit_candle['low'] <= target_price:
-                    price_diff = entry_price - target_price
-                    pips_moved = price_diff / pip_value
-                    gross_pnl = pips_moved * proper_position_size * pip_value_per_lot
-                    total_commission = commission_per_lot * proper_position_size * 2
-                    net_pnl = gross_pnl - total_commission
-                    
-                    # Create detailed trade summary
-                    trade_summary = f"{zone_type} zone - Zone High: {stop_loss:.6f}, Zone Low: {stop_loss - risk_distance:.6f}, Entry: {entry_price:.6f}, Stop: {stop_loss:.6f}, Duration: {exit_idx - entry_idx} candles, Result: {pips_moved:+.0f} pips = ${net_pnl:.0f}"
-                    
-                    return {
-                        'zone_type': zone_type,
-                        'direction': direction,
-                        'entry_price': entry_price,
-                        'entry_date': data.index[entry_idx],
-                        'exit_price': target_price,
-                        'exit_date': data.index[exit_idx],
-                        'result': 'WIN',
                         'pnl': round(net_pnl, 2),
                         'duration_days': exit_idx - entry_idx,
                         'position_size': proper_position_size,
